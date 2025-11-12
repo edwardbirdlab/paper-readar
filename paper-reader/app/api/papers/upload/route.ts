@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getDocument } from 'pdfjs-dist';
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,32 +32,13 @@ export async function POST(request: NextRequest) {
     const fileName = `${user.id}/${Date.now()}-${file.name}`;
     const filePath = `${fileName}`;
 
-    // Convert File to ArrayBuffer for PDF.js
-    const arrayBuffer = await file.arrayBuffer();
-
-    // Extract PDF metadata and text
+    // Basic metadata from filename
+    // Note: PDF metadata extraction happens on client-side in PdfViewer component
     let metadata = {
       title: file.name.replace('.pdf', ''),
       authors: [] as string[],
-      pageCount: 0,
+      pageCount: null, // Will be updated by client after loading
     };
-
-    try {
-      const pdf = await getDocument({ data: arrayBuffer }).promise;
-      metadata.pageCount = pdf.numPages;
-
-      // Try to extract metadata from PDF
-      const pdfMetadata = await pdf.getMetadata();
-      if (pdfMetadata.info.Title) {
-        metadata.title = pdfMetadata.info.Title;
-      }
-      if (pdfMetadata.info.Author) {
-        metadata.authors = [pdfMetadata.info.Author];
-      }
-    } catch (error) {
-      console.error('Error extracting PDF metadata:', error);
-      // Continue with default metadata
-    }
 
     // Upload to Supabase Storage
     const { data: uploadData, error: uploadError } = await supabase.storage

@@ -118,7 +118,7 @@ export default function PdfViewer({
         canvas.height = viewport.height;
         canvas.width = viewport.width;
 
-        const renderContext = {
+        const renderContext: any = {
           canvasContext: context,
           viewport: viewport,
         };
