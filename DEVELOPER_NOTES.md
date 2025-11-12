@@ -7,408 +7,471 @@ This document contains technical notes, architecture decisions, and context for 
 ## 📋 Project Overview
 
 **Purpose**: Progressive Web App for reading, annotating, and listening to scientific papers
-**Status**: MVP Complete - Core features implemented
-**Deployment**: Docker-ready for home lab/Portainer deployment
-**Stack**: Next.js 14, TypeScript, Supabase, PDF.js, Tailwind CSS
+**Status**: v2.0 - Local stack with Kokoro TTS (November 2025)
+**Deployment**: Full Docker stack for home lab/Portainer deployment
+**Stack**: Next.js 14, TypeScript, PostgreSQL, MinIO, Redis, Kokoro TTS (CPU-optimized)
 
 ---
 
 ## 🏗️ Architecture Decisions
 
-### Why Next.js 14 with App Router?
-- Server-side rendering for better performance
-- Built-in API routes eliminate need for separate backend
-- App Router provides better code organization
-- Excellent TypeScript support
-- Native image optimization
+### Why Local Stack Instead of Supabase?
 
-### Why Supabase?
-- **PostgreSQL**: Robust database with full-text search
-- **Row Level Security**: Built-in multi-tenancy
-- **Storage**: Integrated file storage for PDFs and audio
-- **Auth**: Ready-to-use authentication (not yet implemented but ready)
-- **Realtime** (future): Could enable collaborative features
+**Moved from Supabase to fully self-hosted stack:**
+- **Cost control**: No external SaaS fees for database/storage
+- **Data sovereignty**: Everything runs on your hardware
+- **Performance**: Local network latency for all services
+- **Customization**: Full control over database, storage, and queues
+- **Scalability**: Can scale individual services based on needs
 
-### Why Browser-Native TTS?
-- **Current**: Using Web Speech API for immediate functionality
-- **Future**: Designed to easily swap in custom TTS service
-- Position tracking and syncing already implemented
-- API interface designed in documentation
+### Why Kokoro-82M TTS?
 
-### Docker Architecture
-- **Multi-stage build**: Optimizes image size (~200MB final)
-- **Standalone output**: Next.js standalone mode for Docker
-- **Two deployment options**:
-  - Simple: App only (uses cloud Supabase)
-  - Full stack: Complete self-hosted with local Supabase
+**Chosen for maximum quality on CPU-only hardware:**
+- **#1 Ranked**: Top quality in TTS Arena blind tests
+- **CPU-optimized**: Excellent performance without GPU (RTF 0.15-0.3)
+- **Small model**: Only 82M parameters, minimal RAM usage (~2GB)
+- **Fast processing**: Can generate hours of audio in minutes
+- **ONNX Runtime**: Multi-core CPU utilization
+- **Apache 2.0**: Fully open for commercial use
+
+**Alternatives considered:**
+- XTTS v2: Too slow on CPU, non-commercial license
+- Bark: Extremely slow on CPU
+- Piper: Lower quality output
+- StyleTTS2: Slower than Kokoro with similar quality
+
+### Why Chunk-Based Audio?
+
+**Pre-generate audio in semantic chunks:**
+- **Better navigation**: Jump between sections easily
+- **Resume playback**: Pick up where you left off
+- **Partial availability**: Listen to completed chunks while others process
+- **Lower latency**: No real-time generation delays
+- **Better quality**: Can use slower, higher-quality models
 
 ---
 
-## 📁 Project Structure Explained
+## 📁 Project Structure
 
 ```
 paper-reader/
 │
 ├── app/                              # Next.js App Router
 │   ├── api/                          # Backend API routes
-│   │   ├── papers/
-│   │   │   ├── upload/route.ts       # PDF upload handler
-│   │   │   └── [id]/
-│   │   │       ├── route.ts          # Delete paper
-│   │   │       └── notes/route.ts    # Get notes for paper
-│   │   └── notes/
-│   │       ├── text/route.ts         # Create text note
-│   │       ├── voice/route.ts        # Upload voice note
-│   │       └── [id]/route.ts         # Delete note
-│   │
+│   │   └── papers/
+│   │       ├── route.ts              # List all papers
+│   │       ├── upload/route.ts       # Upload, chunk, queue TTS
+│   │       └── [id]/
+│   │           ├── route.ts          # Get/update/delete paper
+│   │           └── chunks/route.ts   # Get chunks with audio URLs
 │   ├── library/page.tsx              # Library grid view
-│   ├── papers/[id]/page.tsx          # Paper reader (server component)
+│   ├── papers/[id]/page.tsx          # Paper reader
 │   ├── upload/page.tsx               # Upload interface
-│   ├── page.tsx                      # Home page
-│   └── layout.tsx                    # Root layout with PWA meta
+│   └── page.tsx                      # Home page
 │
 ├── components/
 │   ├── library/
-│   │   └── LibraryView.tsx           # Client-side library with search/filter
-│   ├── reader/
-│   │   ├── PaperReader.tsx           # Main reader with tabs (Read/Listen/Notes)
-│   │   ├── PdfViewer.tsx             # PDF.js integration
-│   │   ├── AudioPlayer.tsx           # TTS player + voice recording
-│   │   └── NotesPanel.tsx            # Notes display and management
-│   └── upload/
-│       └── PdfUploader.tsx           # Drag-drop upload with progress
+│   │   └── LibraryView.tsx           # Client-side library
+│   └── reader/
+│       ├── PaperReader.tsx           # Main reader (Read/Listen/Notes tabs)
+│       ├── AudioPlayer.tsx           # Chunk-based audio player
+│       ├── PdfViewer.tsx             # PDF.js integration
+│       └── NotesPanel.tsx            # Notes display
 │
 ├── lib/
-│   ├── supabase/
-│   │   ├── client.ts                 # Browser Supabase client
-│   │   └── server.ts                 # Server-side Supabase client
-│   └── types/
-│       └── database.ts               # TypeScript types for database
+│   ├── db/client.ts                  # PostgreSQL client
+│   ├── storage/client.ts             # MinIO S3 client
+│   ├── queue/client.ts               # BullMQ job queue
+│   └── utils/chunking.ts             # Text chunking for papers
 │
-├── supabase/
-│   ├── schema.sql                    # Complete database schema
-│   ├── kong.yml                      # API gateway config (local Supabase)
-│   └── README.md                     # Supabase setup instructions
+├── services/
+│   ├── tts-service/                  # Kokoro TTS FastAPI service
+│   │   ├── Dockerfile
+│   │   ├── main.py                   # TTS generation API
+│   │   └── requirements.txt
+│   └── tts-worker/                   # Background job processor
+│       ├── Dockerfile
+│       ├── package.json
+│       └── src/index.ts              # BullMQ worker
 │
-└── Docker files, docs, configs...
+├── database/
+│   └── schema.sql                    # PostgreSQL schema
+│
+├── docker-compose.yml                # Full stack orchestration
+└── package.json                      # App dependencies
 ```
 
 ---
 
-## 🔑 Key Components Deep Dive
+## 🔑 Key Services
 
-### PDF Upload Flow
-1. **Client** (`PdfUploader.tsx`): Handles file selection, drag-drop, UI feedback
-2. **API** (`/api/papers/upload/route.ts`):
-   - Validates PDF
-   - Extracts metadata using PDF.js
-   - Uploads to Supabase Storage
-   - Creates database record
-   - Returns paper ID
-3. **Redirect**: Sends user to reader page
+### 1. PostgreSQL Database
+- **Image**: `postgres:16-alpine`
+- **Purpose**: Store papers, chunks, notes, tags
+- **Port**: 5432
+- **Schema**: Auto-initialized from `database/schema.sql`
+- **Features**: Full-text search, JSONB, triggers
 
-### PDF Viewing & Text Extraction
-- **PdfViewer.tsx** uses PDF.js CDN worker
-- Renders pages to canvas
-- Extracts ALL text on mount (background process)
-- Text passed to parent for TTS
-- Page navigation and zoom controls
+### 2. MinIO Object Storage
+- **Image**: `minio/minio:latest`
+- **Purpose**: S3-compatible storage for PDFs and audio
+- **Ports**: 9000 (API), 9001 (Console)
+- **Buckets**: `papers`, `audio`, `voice-notes`
+- **Access**: Public read for audio/papers
 
-### Text-to-Speech System
-- **Current**: `window.speechSynthesis` (Web Speech API)
-- **Position Tracking**: `utterance.onboundary` tracks character position
-- **Sync**: Character position used to highlight current text
-- **Voice Notes**: Records at current position with context
+### 3. Redis
+- **Image**: `redis:7-alpine`
+- **Purpose**: Job queue backend for BullMQ
+- **Port**: 6379
+- **Persistence**: Enabled with volume
 
-### Voice Note Recording
-1. **Trigger**: User clicks "Add Voice Note" during playback
-2. **Capture**: Uses `MediaRecorder` API (WebM audio)
-3. **Context**: Grabs ±100 chars of text around current position
-4. **Upload**: Sends to `/api/notes/voice`
-5. **Storage**: Supabase Storage in `voice-notes` bucket
-6. **Database**: Links to paper, position, and context text
+### 4. Kokoro TTS Service
+- **Base**: Python 3.11 with ONNX Runtime
+- **Purpose**: Generate high-quality TTS audio
+- **Port**: 8001 (mapped from 8000)
+- **API**: FastAPI with /generate, /voices endpoints
+- **Model**: Downloaded on first run, cached in volume
+- **Config**: Multi-core CPU optimization
 
-### Database Schema Highlights
+### 5. TTS Worker
+- **Base**: Node.js 20
+- **Purpose**: Process TTS jobs from queue
+- **Concurrency**: Configurable (default: 2)
+- **Flow**: Fetch chunk → Call TTS → Upload to MinIO → Update DB
 
-**Papers Table**:
-- Stores PDF metadata and extracted text
-- `reading_text`: Cleaned text for TTS (future: citation filtering)
-- `reading_progress`: Percentage completed
-- Full-text search index on title + text
-
-**Notes Table**:
-- Polymorphic: text or voice notes
-- `position_data`: JSON with page, character position, scroll
-- `context_text`: What was being read when note created
-- Links to highlights (future feature)
-
-**RLS Policies**:
-- All tables have Row Level Security
-- Users can only access their own data
-- Based on `auth.uid()` from Supabase Auth
+### 6. Next.js App
+- **Base**: Node.js 20
+- **Purpose**: Web application frontend + API
+- **Port**: 3000
+- **Build**: Multi-stage Docker for optimization
 
 ---
 
-## 🚧 Known Limitations & TODOs
+## 🔄 Paper Processing Flow
 
-### Implemented ✅
-- [x] PDF upload and storage
-- [x] PDF viewer with navigation
-- [x] Text extraction
-- [x] Basic TTS (browser native)
-- [x] Voice note recording with position sync
-- [x] Text notes
-- [x] Library with search and filters
-- [x] Reading progress tracking
-- [x] Docker deployment
-- [x] PWA support
+### Upload → TTS Generation
 
-### Not Yet Implemented ⏳
+1. **User uploads PDF** → `/api/papers/upload`
+2. **Extract text and metadata** using `pdf-parse`
+3. **Chunk the text** using `lib/utils/chunking.ts`:
+   - Detect sections (Abstract, Introduction, etc.)
+   - Split into ~500-word chunks
+   - Clean citations and special characters
+4. **Create database records**:
+   - Insert paper record (status: `processing`)
+   - Create chunk records (status: `pending`)
+5. **Queue TTS jobs**:
+   - Bulk add to BullMQ queue
+   - One job per chunk
+6. **Worker processes jobs**:
+   - Fetch chunk text from DB
+   - Call TTS service `/generate`
+   - Download generated audio
+   - Upload to MinIO `audio/{paperId}/{chunkIndex}.wav`
+   - Update chunk record (status: `completed`)
+7. **When all chunks complete**:
+   - Update paper status to `completed`
+   - User can now listen
 
-#### High Priority
-- [ ] **Smart Citation Filtering**: Parse PDF to remove citations/references from TTS
-  - Strategy: Regex patterns + section detection
-  - Skip "References", "Bibliography" sections
-  - Filter inline citations like [1], (Author, 2020)
-  - Store in `reading_text` column (already exists!)
+### Playback Flow
 
-- [ ] **Authentication**: Supabase Auth integration
-  - Login/signup pages
-  - Protected routes
-  - Currently uses RLS but no auth UI
+1. **User clicks "Listen" tab**
+2. **Frontend fetches** `/api/papers/{id}/chunks`
+3. **AudioPlayer component**:
+   - Displays chunks in order
+   - Shows progress (X/Y chunks ready)
+   - Polls every 5s if still processing
+4. **User clicks Play**:
+   - Loads audio URL from MinIO
+   - Plays using HTML5 Audio API
+   - Auto-advances to next chunk when done
+5. **Navigation**:
+   - Skip forward/back between chunks
+   - Seek within current chunk
+   - Speed and volume controls
 
-- [ ] **Tags System**: Database schema exists, needs UI
-  - Tag creation/management
-  - Tag assignment to papers
-  - Filter by tags in library
+---
 
-- [ ] **Highlights**: Database schema exists, needs UI
-  - Text selection in PDF
-  - Color-coded highlights
-  - Save position data
-  - Display in sidebar
+## 💾 Database Schema
 
-#### Medium Priority
-- [ ] **Custom TTS Integration**: Replace browser TTS
-  - API client in `lib/tts/client.ts`
-  - Update AudioPlayer component
-  - Support for pre-processed audio
+### papers
+```sql
+- id (UUID, PK)
+- title, authors, abstract
+- pdf_file_path (MinIO path)
+- total_pages, extracted_text
+- metadata (JSONB)
+- reading_progress (0-100)
+- tts_status (pending/processing/completed/failed)
+- tts_started_at, tts_completed_at
+- upload_date, last_accessed
+```
 
-- [ ] **Search Improvements**
-  - Full-text search across paper content
-  - Search within notes
-  - Advanced filters (date range, authors)
+### paper_chunks
+```sql
+- id (UUID, PK)
+- paper_id (FK to papers)
+- chunk_index (sequential number)
+- chunk_type (abstract/section/paragraph)
+- section_title (optional)
+- text_content (cleaned text)
+- start_page, end_page
+- word_count, char_count
+- audio_file_path (MinIO path)
+- audio_duration (seconds)
+- tts_status (pending/processing/completed/failed)
+```
 
-- [ ] **Export Features**
-  - Export highlights and notes as Markdown
-  - PDF export with annotations
-  - BibTeX export
+### notes
+```sql
+- id (UUID, PK)
+- paper_id (FK to papers)
+- chunk_id (FK to chunks, optional)
+- note_type (text/voice)
+- content (for text notes)
+- voice_file_path (for voice notes)
+- position_data (JSONB: page, position, etc.)
+- context_text (text being read)
+```
 
-- [ ] **Reading Analytics**
-  - Time spent reading
-  - Reading history timeline
-  - Statistics dashboard
+### tags, paper_tags, highlights
+Standard structure for tagging and highlighting features.
 
-#### Low Priority / Nice to Have
-- [ ] **Collaborative Features**
-  - Share papers with other users
-  - Shared annotations
-  - Comments/discussions
+---
 
-- [ ] **Mobile App**: React Native version
-- [ ] **Integration with Reference Managers**: Zotero, Mendeley
-- [ ] **Academic Database Integration**: arXiv, PubMed
-- [ ] **OCR Support**: For scanned PDFs
-- [ ] **Dark Mode**: Already styled for it, needs toggle
+## 🚀 Deployment Guide
+
+### Requirements
+- Docker and Docker Compose
+- 144GB RAM (overkill, but you have it!)
+- CPU with many cores (Xeon - perfect for Kokoro)
+- ~20GB disk space for images
+- Additional space for papers and audio
+
+### Quick Start
+
+1. **Clone repository**
+   ```bash
+   cd /your/deployment/path
+   git clone https://github.com/edwardbirdlab/paper-readar.git
+   cd paper-readar
+   ```
+
+2. **Configure environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your settings
+   nano .env
+   ```
+
+3. **Start stack**
+   ```bash
+   docker-compose up -d
+   ```
+
+4. **Check status**
+   ```bash
+   docker-compose ps
+   docker-compose logs -f
+   ```
+
+5. **Access services**
+   - App: http://localhost:3000
+   - MinIO Console: http://localhost:9001
+   - Database: localhost:5432
+
+### First Time Setup
+
+**Database** initializes automatically from `database/schema.sql`
+
+**MinIO buckets** auto-created by `minio-init` container:
+- papers
+- audio
+- voice-notes
+
+**TTS model** downloads on first generation (~80MB)
+
+### Monitoring
+
+```bash
+# View all logs
+docker-compose logs -f
+
+# View specific service
+docker-compose logs -f tts-worker
+
+# Check TTS queue
+docker-compose exec redis redis-cli
+> KEYS *
+> HGETALL bull:tts-jobs:1
+```
 
 ---
 
 ## 🔧 Development Workflow
 
-### Local Development Setup
+### Local Development (Without Docker)
 
 ```bash
-cd paper-reader
+# Install dependencies
 npm install
 
-# Create .env.local with Supabase credentials
+# Set up local services
+# You'll need: PostgreSQL, MinIO, Redis running locally
+
+# Configure environment
 cp .env.example .env.local
-# Edit .env.local with your Supabase URL and key
+# Edit with local service URLs
 
 # Run dev server
 npm run dev
 
-# Open http://localhost:3000
+# App runs on http://localhost:3000
 ```
 
 ### Making Changes
 
-1. **Frontend Changes**: Edit components, hot reload works
-2. **API Changes**: Edit routes in `app/api/`, server restarts
-3. **Database Changes**: Update `supabase/schema.sql`, rerun in Supabase
-4. **Type Changes**: Update `lib/types/database.ts` to match schema
+**Frontend changes:**
+- Edit components → Hot reload works
+- API routes → Server restarts automatically
 
-### Testing PDF Upload
+**Database changes:**
+1. Update `database/schema.sql`
+2. Apply to running DB:
+   ```bash
+   docker-compose exec postgres psql -U paper_reader -d paper_reader -f /docker-entrypoint-initdb.d/01-schema.sql
+   ```
 
-You have sample PDFs in `/workspace/sample_papers/`:
-- `insects-12-00917.pdf` (1.5 MB)
-- Mosquito research paper
+**TTS service changes:**
+1. Edit `services/tts-service/main.py`
+2. Rebuild:
+   ```bash
+   docker-compose up -d --build tts-service
+   ```
 
-### Docker Testing
+**Worker changes:**
+1. Edit `services/tts-worker/src/index.ts`
+2. Rebuild:
+   ```bash
+   docker-compose up -d --build tts-worker
+   ```
+
+---
+
+## 🐛 Troubleshooting
+
+### TTS Generation Stuck
 
 ```bash
-# Build and run
-docker-compose up --build
+# Check worker logs
+docker-compose logs tts-worker
 
-# View logs
-docker-compose logs -f
+# Check TTS service
+docker-compose logs tts-service
 
-# Stop
-docker-compose down
+# Check queue
+docker-compose exec redis redis-cli
+> KEYS bull:tts-jobs:*
 ```
 
----
+### Audio Not Playing
 
-## 🐛 Debugging Tips
+- Check MinIO bucket permissions
+- Verify audio file exists in MinIO console
+- Check browser console for CORS errors
+- Ensure MinIO is accessible from browser
 
-### PDF.js Issues
-- **Worker errors**: Check CDN worker URL in `PdfViewer.tsx`
-- **CORS issues**: PDF.js needs proper CORS headers
-- **Memory**: Large PDFs can crash - implement pagination
+### Database Connection Errors
 
-### Supabase Storage Issues
-- **Upload fails**: Check bucket exists and RLS policies
-- **Can't view PDFs**: Storage policies must allow SELECT
-- **File path**: Format is `{user_id}/{timestamp}-{filename}`
+```bash
+# Check postgres is running
+docker-compose ps postgres
 
-### TTS Not Working
-- **Browser support**: Check `window.speechSynthesis` exists
-- **Voices**: Different browsers have different voices
-- **Rate limits**: Some browsers limit TTS length
-
-### Voice Recording Issues
-- **Permission denied**: Browser blocks mic without HTTPS
-- **Format support**: WebM may not work on all browsers
-- **Size limits**: Large recordings may fail upload
-
----
-
-## 📊 Database Queries to Know
-
-### Get all papers for user with tags
-```sql
-SELECT p.*,
-       array_agg(t.name) as tag_names
-FROM papers p
-LEFT JOIN paper_tags pt ON p.id = pt.paper_id
-LEFT JOIN tags t ON pt.tag_id = t.id
-WHERE p.user_id = 'user-uuid'
-GROUP BY p.id;
+# Check connection
+docker-compose exec app node -e "const {Pool}=require('pg'); new Pool({connectionString:process.env.DATABASE_URL}).query('SELECT NOW()').then(r=>console.log(r.rows))"
 ```
 
-### Full-text search
-```sql
-SELECT * FROM papers
-WHERE to_tsvector('english', title || ' ' || extracted_text)
-      @@ to_tsquery('english', 'mosquito & insecticide')
-AND user_id = 'user-uuid';
-```
+### Slow TTS Generation
 
-### Get notes with context
-```sql
-SELECT n.*, p.title as paper_title
-FROM notes n
-JOIN papers p ON n.paper_id = p.id
-WHERE n.user_id = 'user-uuid'
-ORDER BY n.created_at DESC;
-```
+- Check CPU usage: `htop` or `docker stats`
+- Increase worker concurrency in `.env`: `WORKER_CONCURRENCY=4`
+- Adjust TTS threads: `CPU_CORES=16`
+- Remember: Quality over speed (hours are OK!)
 
 ---
 
-## 🔐 Environment Variables Reference
+## 📊 Performance Expectations
 
-### Required
-- `NEXT_PUBLIC_SUPABASE_URL`: Your Supabase project URL
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Public anon key
+### TTS Generation Speed (Kokoro on CPU)
+- **Processing**: ~15-30 minutes for typical paper
+- **Output**: 5-6 hours of audio
+- **RTF**: 0.15-0.3 (generates 3-7x faster than playback)
+- **Your hardware**: Many cores = fast parallel processing
 
-### Optional
-- `NEXT_PUBLIC_TTS_API_URL`: Custom TTS service endpoint
-- `TTS_API_KEY`: API key for TTS service
+### Typical Paper Sizes
+- **Small** (10 pages): ~5,000 words → ~8 chunks → ~35 min audio → ~5 min TTS
+- **Medium** (20 pages): ~10,000 words → ~15 chunks → ~70 min audio → ~10 min TTS
+- **Large** (50 pages): ~25,000 words → ~40 chunks → ~3 hr audio → ~20 min TTS
 
-### Docker-specific (Full Stack)
-- `POSTGRES_PASSWORD`: Database password
-- `JWT_SECRET`: Min 32 chars for JWT signing
-- `SUPABASE_ANON_KEY`: Generated anon key
-- `SUPABASE_SERVICE_KEY`: Generated service role key
-
----
-
-## 🚀 Deployment Checklist
-
-### Before Deploying
-- [ ] Update environment variables
-- [ ] Run database schema in Supabase
-- [ ] Create storage buckets (papers, voice-notes, tts-audio)
-- [ ] Apply storage policies
-- [ ] Test PDF upload
-- [ ] Test TTS playback
-- [ ] Test voice recording
-
-### Production Considerations
-- [ ] Enable Supabase Auth
-- [ ] Set up SSL/HTTPS (for PWA and mic access)
-- [ ] Configure rate limiting
-- [ ] Set up backup strategy
-- [ ] Monitor storage usage
-- [ ] Set file size limits
+### Storage Requirements
+- **PDF**: 1-5 MB typical
+- **Audio per paper**: ~50-100 MB (WAV format)
+- **With 100 papers**: ~5-10 GB storage needed
 
 ---
 
-## 💡 Code Patterns Used
+## 🚧 TODO / Future Features
 
-### Server Components
-- Pages in `app/` are server components by default
-- Fetch data, no client-side JavaScript until needed
-- SEO-friendly, fast initial load
+### High Priority
+- [ ] **Authentication**: Add user accounts (optional for self-hosted)
+- [ ] **Tags UI**: Frontend for creating and assigning tags
+- [ ] **Highlights**: Text selection and color-coded highlighting
+- [ ] **Mobile optimization**: Better responsive design
 
-### Client Components
-- Use `'use client'` directive at top
-- All interactive components (buttons, forms)
-- All components using hooks (useState, useEffect)
+### Medium Priority
+- [ ] **Voice selection**: Let users choose from Kokoro voices
+- [ ] **Bookmark system**: Quick links to important sections
+- [ ] **Export notes**: Markdown/PDF export
+- [ ] **Citation parsing**: Better filtering of references
+- [ ] **Search**: Full-text search across papers
 
-### API Routes
-- Follow Next.js App Router conventions
-- TypeScript with proper types
-- Error handling with try/catch
-- Return JSON with NextResponse
-
-### Supabase Usage
-- Server-side: Use server client with cookies
-- Client-side: Use browser client
-- Always check authentication before DB operations
-- Let RLS handle authorization
+### Low Priority / Nice to Have
+- [ ] **Collaborative features**: Share papers and notes
+- [ ] **Integration**: arXiv, PubMed import
+- [ ] **OCR support**: For scanned PDFs
+- [ ] **Dark mode toggle**: UI already supports it
+- [ ] **Keyboard shortcuts**: Power user features
 
 ---
 
-## 🎨 Styling Conventions
+## 💡 Tips & Best Practices
 
-- **Tailwind CSS**: Utility-first, responsive
-- **Dark mode**: `dark:` classes already added
-- **Colors**: Blue primary, semantic colors for status
-- **Spacing**: Consistent padding/margin scale
-- **Components**: Self-contained styling
+### For Best TTS Quality
+- Upload clean, text-based PDFs (not scans)
+- Papers with clear section headers chunk better
+- Remove extremely long papers into separate uploads
+
+### For Performance
+- Let TTS finish processing before listening (better experience)
+- Use worker concurrency = CPU cores / 2
+- Monitor disk space (audio files add up!)
+
+### For Development
+- Test with small papers first (~10 pages)
+- Check logs frequently when debugging workers
+- Use MinIO console to verify uploads
+- Keep docker-compose logs open in separate terminal
 
 ---
 
-## 📝 Commit Message Format
+## 📝 Commit Guidelines
 
-Follow the format used:
 ```
 Short summary (50 chars)
 
-## Section
-- Bullet points
-- Detailed changes
+## Changes
+- Bullet point 1
+- Bullet point 2
 
 🤖 Generated with Claude Code
 Co-Authored-By: Claude <noreply@anthropic.com>
@@ -416,125 +479,35 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ---
 
-## 🔮 Future Architecture Ideas
+## 📚 Useful Commands
 
-### Microservices (If Scaling)
-- Separate TTS service (already designed for)
-- PDF processing service (for OCR, citation parsing)
-- Search service (Elasticsearch/Meilisearch)
-
-### State Management
-- Currently using React state
-- If complex: Consider Zustand or Jotai
-- Avoid Redux (overkill for this app)
-
-### Real-time Features
-- Supabase Realtime for collaborative editing
-- Live cursor positions
-- Shared annotations
-
-### Performance
-- Implement virtual scrolling for large libraries
-- Lazy load PDF pages
-- Cache parsed text in IndexedDB
-- Service worker caching for offline PDFs
-
----
-
-## 🆘 Common Issues & Solutions
-
-### "Module not found" errors
 ```bash
-rm -rf node_modules package-lock.json
-npm install
+# Full stack restart
+docker-compose down && docker-compose up -d
+
+# Clean restart (removes volumes!)
+docker-compose down -v && docker-compose up -d
+
+# View specific service logs
+docker-compose logs -f [service-name]
+
+# Execute command in container
+docker-compose exec [service] [command]
+
+# Check resource usage
+docker stats
+
+# Backup database
+docker-compose exec postgres pg_dump -U paper_reader paper_reader > backup.sql
+
+# Restore database
+cat backup.sql | docker-compose exec -T postgres psql -U paper_reader paper_reader
 ```
-
-### PDF.js worker errors
-Check `PdfViewer.tsx` line with `GlobalWorkerOptions.workerSrc`
-
-### Supabase "relation does not exist"
-Schema not applied - run `schema.sql` in Supabase SQL Editor
-
-### Docker build fails
-Clear Docker cache:
-```bash
-docker system prune -a
-docker-compose build --no-cache
-```
-
-### PWA not installing
-- Must be HTTPS (or localhost)
-- Check manifest.json is valid
-- Service worker must register
-
----
-
-## 📚 Useful Resources
-
-- [Next.js App Router Docs](https://nextjs.org/docs/app)
-- [Supabase Docs](https://supabase.com/docs)
-- [PDF.js Documentation](https://mozilla.github.io/pdf.js/)
-- [Web Speech API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API)
-- [PWA Guidelines](https://web.dev/progressive-web-apps/)
-
----
-
-## 🤝 Contributing Guidelines (For Future Self)
-
-1. **Always update types** when changing database schema
-2. **Test in Docker** before committing deployment changes
-3. **Update this document** when making architectural changes
-4. **Write migrations** for database schema changes
-5. **Keep documentation in sync** with code changes
-
----
-
-## 📊 Current Stats
-
-- **Lines of Code**: ~16,000
-- **Components**: 8 main components
-- **API Routes**: 6 endpoints
-- **Database Tables**: 8 tables
-- **Docker Images**: 1 (multi-stage)
-- **Documentation Files**: 7
-
----
-
-## 🎯 Next Session Priorities
-
-When resuming development, start with:
-
-1. **Smart Citation Filtering** (highest user value)
-   - Implement text parsing in `app/api/papers/upload/route.ts`
-   - Add cleaning logic to remove citations
-   - Store in `reading_text` column
-   - Test with sample papers
-
-2. **Authentication UI** (required for production)
-   - Add login/signup pages
-   - Protect routes
-   - Add user profile
-
-3. **Tags UI** (schema exists, needs frontend)
-   - Tag creation modal
-   - Tag assignment interface
-   - Filter implementation
 
 ---
 
 **Last Updated**: 2025-11-12
-**Version**: 1.0.0 - MVP Complete
-**Next Milestone**: Smart parsing + Auth + Tags = v1.1.0
+**Version**: 2.0.0 - Local Stack with Kokoro TTS
+**Architecture**: Fully self-hosted, CPU-optimized, production-ready
 
----
-
-## 💭 Design Philosophy
-
-This project prioritizes:
-- **User Experience**: Clean, intuitive interfaces
-- **Performance**: Fast loading, responsive interactions
-- **Privacy**: Self-hosted option, data ownership
-- **Accessibility**: Semantic HTML, keyboard navigation
-- **Maintainability**: Clear code structure, comprehensive docs
-
-Happy coding! 🚀
+Happy reading! 📖🎧
