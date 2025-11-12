@@ -1,6 +1,6 @@
 # Scientific Paper Reader
 
-A Progressive Web App for reading, annotating, and listening to scientific papers with AI-powered features.
+A Progressive Web App for reading, annotating, and listening to scientific papers with AI-powered features. Warning! This is my first experiment with "Vibe coding", or letting AI code a entire project with me only providing human language inputs. I have done no code validation of what it has written. Use at your own risk!
 
 ## Features
 
