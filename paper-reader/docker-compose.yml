@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  # Next.js Paper Reader App
+  paper-reader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: paper-reader
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      - NEXT_PUBLIC_TTS_API_URL=${NEXT_PUBLIC_TTS_API_URL:-http://localhost:8000/api/tts}
+      - TTS_API_KEY=${TTS_API_KEY:-}
+    networks:
+      - paper-reader-network
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+networks:
+  paper-reader-network:
+    driver: bridge
