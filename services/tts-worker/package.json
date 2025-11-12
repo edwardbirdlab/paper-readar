@@ -1,0 +1,25 @@
+{
+  "name": "tts-worker",
+  "version": "1.0.0",
+  "description": "Background worker for processing TTS jobs",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "bullmq": "^5.1.0",
+    "pg": "^8.11.3",
+    "minio": "^7.1.3",
+    "axios": "^1.6.5",
+    "dotenv": "^16.3.1",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "@types/pg": "^8.10.9",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2"
+  }
+}

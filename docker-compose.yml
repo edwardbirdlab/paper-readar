@@ -1,25 +1,164 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: paper-reader-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: paper_reader
+      POSTGRES_USER: paper_reader
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    networks:
+      - paper-reader-network
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paper_reader"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO Object Storage (S3-compatible)
+  minio:
+    image: minio/minio:latest
+    container_name: paper-reader-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    networks:
+      - paper-reader-network
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # Web Console
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MinIO Client - Initialize buckets on startup
+  minio-init:
+    image: minio/mc:latest
+    container_name: paper-reader-minio-init
+    depends_on:
+      - minio
+    networks:
+      - paper-reader-network
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin};
+      mc mb myminio/papers --ignore-existing;
+      mc mb myminio/audio --ignore-existing;
+      mc anonymous set download myminio/papers;
+      mc anonymous set download myminio/audio;
+      exit 0;
+      "
+
+  # Redis - Job Queue Backend
+  redis:
+    image: redis:7-alpine
+    container_name: paper-reader-redis
+    restart: unless-stopped
+    networks:
+      - paper-reader-network
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kokoro TTS Service
+  tts-service:
+    build:
+      context: ./services/tts-service
+      dockerfile: Dockerfile
+    container_name: paper-reader-tts-service
+    restart: unless-stopped
+    environment:
+      - ONNX_NUM_THREADS=${CPU_CORES:-8}
+      - MODEL_PATH=/app/models
+    volumes:
+      - tts_models:/app/models
+    networks:
+      - paper-reader-network
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # TTS Worker - Background job processor
+  tts-worker:
+    build:
+      context: ./services/tts-worker
+      dockerfile: Dockerfile
+    container_name: paper-reader-tts-worker
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - postgres
+      - minio
+      - tts-service
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://paper_reader:${POSTGRES_PASSWORD:-changeme}@postgres:5432/paper_reader
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - TTS_SERVICE_URL=http://tts-service:8000
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-2}
+    networks:
+      - paper-reader-network
+
   # Next.js Paper Reader App
-  paper-reader:
+  app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: paper-reader
+    container_name: paper-reader-app
     restart: unless-stopped
+    depends_on:
+      - postgres
+      - minio
+      - redis
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
-      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-      - NEXT_PUBLIC_TTS_API_URL=${NEXT_PUBLIC_TTS_API_URL:-http://localhost:8000/api/tts}
-      - TTS_API_KEY=${TTS_API_KEY:-}
+      - DATABASE_URL=postgresql://paper_reader:${POSTGRES_PASSWORD:-changeme}@postgres:5432/paper_reader
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_USE_SSL=false
+      - REDIS_URL=redis://redis:6379
+      - TTS_SERVICE_URL=http://tts-service:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:3000
     networks:
       - paper-reader-network
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+
+volumes:
+  postgres_data:
+  minio_data:
+  redis_data:
+  tts_models:
 
 networks:
   paper-reader-network:

@@ -1,20 +1,19 @@
+/**
+ * Paper Upload API Route
+ * Handles PDF upload, text extraction, chunking, and TTS job queueing
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import * as pdf from 'pdf-parse';
+import db from '@/lib/db/client';
+import storage from '@/lib/storage/client';
+import queue from '@/lib/queue/client';
+import { chunkPaperText, cleanTextForTTS } from '@/lib/utils/chunking';
+
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
-
-    // Check authentication
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     // Get the uploaded file
     const formData = await request.formData();
     const file = formData.get('file') as File;
@@ -27,77 +26,145 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'File must be a PDF' }, { status: 400 });
     }
 
-    // Generate a unique file path
-    const fileExt = 'pdf';
-    const fileName = `${user.id}/${Date.now()}-${file.name}`;
-    const filePath = `${fileName}`;
+    if (file.size > MAX_FILE_SIZE) {
+      return NextResponse.json(
+        { error: `File size must be less than ${MAX_FILE_SIZE / 1024 / 1024}MB` },
+        { status: 400 }
+      );
+    }
 
-    // Basic metadata from filename
-    // Note: PDF metadata extraction happens on client-side in PdfViewer component
-    let metadata = {
-      title: file.name.replace('.pdf', ''),
-      authors: [] as string[],
-      pageCount: null, // Will be updated by client after loading
+    // Convert file to buffer
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    console.log(`Processing PDF upload: ${file.name} (${file.size} bytes)`);
+
+    // Extract text and metadata from PDF
+    let pdfData;
+    try {
+      pdfData = await pdf(buffer);
+    } catch (error) {
+      console.error('PDF parsing error:', error);
+      return NextResponse.json(
+        { error: 'Failed to parse PDF file' },
+        { status: 400 }
+      );
+    }
+
+    const { text, info, numpages } = pdfData;
+
+    if (!text || text.trim().length < 100) {
+      return NextResponse.json(
+        { error: 'PDF appears to be empty or unreadable. Please ensure it contains text.' },
+        { status: 400 }
+      );
+    }
+
+    // Extract metadata
+    const title = info?.Title || file.name.replace('.pdf', '');
+    const authors = info?.Author || '';
+    const metadata = {
+      creator: info?.Creator,
+      producer: info?.Producer,
+      creationDate: info?.CreationDate,
+      modDate: info?.ModDate,
+      subject: info?.Subject,
+      keywords: info?.Keywords
     };
 
-    // Upload to Supabase Storage
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('papers')
-      .upload(filePath, file, {
-        contentType: 'application/pdf',
-        upsert: false,
-      });
+    console.log(`Extracted ${numpages} pages, ${text.length} characters`);
 
-    if (uploadError) {
-      console.error('Upload error:', uploadError);
-      return NextResponse.json(
-        { error: 'Failed to upload file' },
-        { status: 500 }
-      );
-    }
+    // Generate unique file path
+    const timestamp = Date.now();
+    const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const filePath = `${timestamp}-${safeName}`;
 
-    // Get public URL
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from('papers').getPublicUrl(filePath);
+    // Upload PDF to MinIO
+    console.log('Uploading PDF to storage...');
+    await storage.papers.upload(filePath, buffer);
 
     // Create paper record in database
-    const { data: paper, error: dbError } = await supabase
-      .from('papers')
-      .insert({
-        user_id: user.id,
-        title: metadata.title,
-        authors: metadata.authors,
-        pdf_url: publicUrl,
-        pdf_storage_path: filePath,
-        page_count: metadata.pageCount,
-        file_size: file.size,
-        reading_status: 'unread',
-      })
-      .select()
-      .single();
+    console.log('Creating paper record...');
+    const paper = await db.papers.create({
+      title,
+      authors,
+      pdfFilePath: filePath,
+      totalPages: numpages,
+      extractedText: text,
+      metadata
+    });
 
-    if (dbError) {
-      console.error('Database error:', dbError);
-      // Clean up uploaded file
-      await supabase.storage.from('papers').remove([filePath]);
-      return NextResponse.json(
-        { error: 'Failed to create paper record' },
-        { status: 500 }
-      );
+    console.log(`Paper created with ID: ${paper.id}`);
+
+    // Update paper to processing status
+    await db.papers.update(paper.id, {
+      ttsStatus: 'processing'
+    });
+
+    // Chunk the paper text
+    console.log('Chunking paper text...');
+    const chunks = chunkPaperText(text);
+    console.log(`Created ${chunks.length} chunks`);
+
+    // Create chunk records and queue TTS jobs
+    const ttsJobs = [];
+
+    for (const chunk of chunks) {
+      // Clean text for TTS
+      const cleanedText = cleanTextForTTS(chunk.text);
+
+      // Create chunk record
+      const chunkRecord = await db.paperChunks.create({
+        paperId: paper.id,
+        chunkIndex: chunk.index,
+        chunkType: chunk.type,
+        sectionTitle: chunk.sectionTitle,
+        textContent: cleanedText,
+        startPage: chunk.startPage,
+        endPage: chunk.endPage,
+        wordCount: chunk.wordCount,
+        charCount: chunk.charCount
+      });
+
+      // Prepare TTS job
+      ttsJobs.push({
+        paperId: paper.id,
+        chunkId: chunkRecord.id,
+        text: cleanedText,
+        chunkIndex: chunk.index,
+        voice: 'af_sarah' // Default voice
+      });
     }
 
-    // Queue text extraction (this would be done in a background job in production)
-    // For now, we'll return the paper and handle extraction separately
+    // Queue all TTS jobs in bulk
+    console.log(`Queueing ${ttsJobs.length} TTS jobs...`);
+    await queue.addBulkTTSJobs(ttsJobs);
+
+    // Update paper with TTS started timestamp
+    await db.query(
+      `UPDATE papers SET tts_started_at = NOW() WHERE id = $1`,
+      [paper.id]
+    );
+
+    console.log(`Upload complete for paper ${paper.id}`);
+
     return NextResponse.json({
       id: paper.id,
-      message: 'Paper uploaded successfully',
-      paper,
+      message: 'Paper uploaded successfully and TTS processing started',
+      paper: {
+        id: paper.id,
+        title: paper.title,
+        authors: paper.authors,
+        totalPages: paper.total_pages,
+        totalChunks: chunks.length,
+        ttsStatus: 'processing'
+      }
     });
-  } catch (error) {
+
+  } catch (error: any) {
     console.error('Upload error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: error.message || 'Internal server error' },
       { status: 500 }
     );
   }
