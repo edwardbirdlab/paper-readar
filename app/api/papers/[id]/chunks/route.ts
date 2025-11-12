@@ -9,10 +9,10 @@ import storage from '@/lib/storage/client';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const paperId = params.id;
+    const { id: paperId } = await params;
 
     // Get paper to verify it exists
     const paper = await db.papers.findById(paperId);

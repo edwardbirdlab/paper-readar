@@ -3,7 +3,7 @@
  * Replaces Supabase client with direct PostgreSQL connection
  */
 
-import { Pool, PoolClient, QueryResult } from 'pg';
+import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 // Create connection pool
 const pool = new Pool({
@@ -21,7 +21,7 @@ pool.on('error', (err) => {
 /**
  * Execute a query against the database
  */
-export async function query<T = any>(
+export async function query<T extends QueryResultRow = any>(
   text: string,
   params?: any[]
 ): Promise<QueryResult<T>> {

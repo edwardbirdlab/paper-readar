@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import db from '@/lib/db/client';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -8,39 +8,15 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const supabase = await createClient();
-
-    // Check authentication
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
 
     // Fetch notes for this paper
-    const { data: notes, error } = await supabase
-      .from('notes')
-      .select('*')
-      .eq('paper_id', id)
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('Database error:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch notes' },
-        { status: 500 }
-      );
-    }
+    const notes = await db.notes.findByPaperId(id);
 
     return NextResponse.json({ notes });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: error.message || 'Internal server error' },
       { status: 500 }
     );
   }

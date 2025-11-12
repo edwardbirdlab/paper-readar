@@ -4,7 +4,6 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import * as pdf from 'pdf-parse';
 import db from '@/lib/db/client';
 import storage from '@/lib/storage/client';
 import queue from '@/lib/queue/client';
@@ -40,9 +39,12 @@ export async function POST(request: NextRequest) {
     console.log(`Processing PDF upload: ${file.name} (${file.size} bytes)`);
 
     // Extract text and metadata from PDF
+    // Use dynamic import for pdf-parse
+    const pdfParse: any = await import('pdf-parse');
     let pdfData;
     try {
-      pdfData = await pdf(buffer);
+      // Call the default or module itself based on what's available
+      pdfData = await (pdfParse.default || pdfParse)(buffer);
     } catch (error) {
       console.error('PDF parsing error:', error);
       return NextResponse.json(

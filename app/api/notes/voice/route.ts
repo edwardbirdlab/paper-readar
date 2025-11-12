@@ -1,25 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import db from '@/lib/db/client';
+import storage from '@/lib/storage/client';
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
-
-    // Check authentication
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const formData = await request.formData();
     const audioFile = formData.get('audio') as File;
     const paperId = formData.get('paperId') as string;
+    const chunkId = formData.get('chunkId') as string;
     const currentPage = parseInt(formData.get('currentPage') as string);
-    const characterPosition = parseInt(formData.get('characterPosition') as string);
+    const timePosition = parseFloat(formData.get('timePosition') as string);
     const contextText = formData.get('contextText') as string;
     const duration = parseInt(formData.get('duration') as string);
 
@@ -30,65 +20,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Convert audio file to buffer
+    const arrayBuffer = await audioFile.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
     // Generate unique file path
-    const fileExt = 'webm';
-    const fileName = `${user.id}/${paperId}/${Date.now()}.${fileExt}`;
+    const fileName = `${paperId}/${Date.now()}.webm`;
 
-    // Upload audio to Supabase Storage
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('voice-notes')
-      .upload(fileName, audioFile, {
-        contentType: audioFile.type,
-        upsert: false,
-      });
-
-    if (uploadError) {
-      console.error('Upload error:', uploadError);
-      return NextResponse.json(
-        { error: 'Failed to upload audio' },
-        { status: 500 }
-      );
-    }
-
-    // Get public URL
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from('voice-notes').getPublicUrl(fileName);
+    // Upload audio to MinIO
+    await storage.voiceNotes.upload(fileName, buffer);
 
     // Create note record
-    const { data: note, error: dbError } = await supabase
-      .from('notes')
-      .insert({
-        paper_id: paperId,
-        user_id: user.id,
-        note_type: 'voice',
-        audio_url: publicUrl,
-        audio_storage_path: fileName,
-        position_data: {
-          page_number: currentPage,
-          character_position: characterPosition,
-        },
-        context_text: contextText,
-        duration: duration,
-      })
-      .select()
-      .single();
-
-    if (dbError) {
-      console.error('Database error:', dbError);
-      // Clean up uploaded file
-      await supabase.storage.from('voice-notes').remove([fileName]);
-      return NextResponse.json(
-        { error: 'Failed to create note record' },
-        { status: 500 }
-      );
-    }
+    const note = await db.notes.create({
+      paperId,
+      chunkId,
+      noteType: 'voice',
+      voiceFilePath: fileName,
+      voiceDuration: duration,
+      positionData: {
+        page_number: currentPage,
+        time_position: timePosition,
+      },
+      contextText,
+    });
 
     return NextResponse.json({ note });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: error.message || 'Internal server error' },
       { status: 500 }
     );
   }

@@ -228,10 +228,12 @@ export async function copyFile(
   destFile: string
 ): Promise<void> {
   try {
+    const conditions = new (minioClient as any).CopyConditions();
     await minioClient.copyObject(
       destBucket,
       destFile,
-      `/${sourceBucket}/${sourceFile}`
+      `/${sourceBucket}/${sourceFile}`,
+      conditions
     );
     console.log(`File copied: ${sourceBucket}/${sourceFile} -> ${destBucket}/${destFile}`);
   } catch (error) {

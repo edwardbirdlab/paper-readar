@@ -4,6 +4,7 @@ import withPWA from "@ducanh2912/next-pwa";
 const nextConfig: NextConfig = {
   /* config options here */
   output: "standalone", // Enable standalone output for Docker
+  turbopack: {}, // Add empty turbopack config to silence warning
   webpack: (config) => {
     config.resolve.alias.canvas = false;
     config.resolve.alias.encoding = false;
