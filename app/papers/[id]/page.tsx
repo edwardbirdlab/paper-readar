@@ -1,4 +1,3 @@
-import { createClient } from '@/lib/supabase/server';
 import { notFound } from 'next/navigation';
 import PaperReader from '@/components/reader/PaperReader';
 
@@ -8,18 +7,22 @@ interface PageProps {
 
 export default async function PaperPage({ params }: PageProps) {
   const { id } = await params;
-  const supabase = await createClient();
 
-  // Fetch the paper
-  const { data: paper, error } = await supabase
-    .from('papers')
-    .select('*')
-    .eq('id', id)
-    .single();
+  // Fetch the paper from API
+  try {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/api/papers/${id}`, {
+      cache: 'no-store' // Always fetch fresh data
+    });
 
-  if (error || !paper) {
+    if (!response.ok) {
+      notFound();
+    }
+
+    const paper = await response.json();
+
+    return <PaperReader paper={paper} />;
+  } catch (error) {
+    console.error('Error fetching paper:', error);
     notFound();
   }
-
-  return <PaperReader paper={paper} />;
 }

@@ -1,26 +1,21 @@
-import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
 import LibraryView from '@/components/library/LibraryView';
 
 export default async function LibraryPage() {
-  const supabase = await createClient();
+  // Fetch papers from API
+  try {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/api/papers`, {
+      cache: 'no-store' // Always fetch fresh data
+    });
 
-  // Check authentication
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
+    if (!response.ok) {
+      throw new Error('Failed to fetch papers');
+    }
 
-  if (authError || !user) {
-    redirect('/login');
+    const data = await response.json();
+
+    return <LibraryView initialPapers={data.papers || []} />;
+  } catch (error) {
+    console.error('Error fetching papers:', error);
+    return <LibraryView initialPapers={[]} />;
   }
-
-  // Fetch papers
-  const { data: papers, error } = await supabase
-    .from('papers')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false });
-
-  return <LibraryView initialPapers={papers || []} />;
 }
