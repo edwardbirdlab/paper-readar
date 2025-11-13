@@ -120,6 +120,14 @@ else
     COMPOSE_CMD="docker compose"
 fi
 
+# Stop and remove existing containers
+echo "🛑 Stopping existing containers..."
+$COMPOSE_CMD down
+
+# Remove postgres volume to ensure fresh database initialization
+echo "🗑️  Removing old database volume to reinitialize schema..."
+docker volume rm paper-reader_postgres_data 2>/dev/null || true
+
 # Rebuild containers from scratch without cache
 # --build: Build images before starting containers
 # --force-recreate: Recreate containers even if config hasn't changed
@@ -127,7 +135,7 @@ fi
 echo "🔨 Rebuilding all images from scratch..."
 $COMPOSE_CMD build --no-cache
 
-echo "🔄 Recreating all containers..."
+echo "🔄 Starting all containers..."
 $COMPOSE_CMD up -d --force-recreate
 
 echo ""

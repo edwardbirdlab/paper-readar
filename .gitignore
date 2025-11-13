@@ -45,6 +45,7 @@ next-env.d.ts
 .env.production
 backups/
 *.sql
+!database/schema.sql
 *.tar.gz
 
 # logs
