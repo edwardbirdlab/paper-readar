@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS papers (
   reading_progress FLOAT DEFAULT 0,
   reading_status TEXT DEFAULT 'unread' CHECK (reading_status IN ('unread', 'reading', 'completed')),
   tts_status TEXT DEFAULT 'pending' CHECK (tts_status IN ('pending', 'processing', 'completed', 'failed')),
+  tts_error TEXT,
   tts_started_at TIMESTAMP WITH TIME ZONE,
   tts_completed_at TIMESTAMP WITH TIME ZONE,
   upload_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -88,7 +89,7 @@ CREATE TABLE IF NOT EXISTS notes (
   voice_file_path TEXT,
   position_data JSONB,
   context_text TEXT,
-  duration INTEGER,
+  voice_duration INTEGER,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -161,3 +162,51 @@ CREATE TRIGGER update_notes_updated_at BEFORE UPDATE ON notes
 DROP TRIGGER IF EXISTS update_audio_sessions_updated_at ON audio_sessions;
 CREATE TRIGGER update_audio_sessions_updated_at BEFORE UPDATE ON audio_sessions
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Create papers_with_tags view for API queries
+-- This view joins papers with their associated tags
+CREATE OR REPLACE VIEW papers_with_tags AS
+SELECT
+  p.*,
+  COALESCE(array_agg(t.name) FILTER (WHERE t.id IS NOT NULL), ARRAY[]::TEXT[]) as tag_names,
+  COALESCE(array_agg(t.color) FILTER (WHERE t.id IS NOT NULL), ARRAY[]::TEXT[]) as tag_colors
+FROM papers p
+LEFT JOIN paper_tags pt ON p.id = pt.paper_id
+LEFT JOIN tags t ON pt.tag_id = t.id
+GROUP BY p.id;
+
+-- Create search_papers function for full-text search
+-- This function searches across title, authors, and abstract fields
+CREATE OR REPLACE FUNCTION search_papers(search_query TEXT)
+RETURNS TABLE (
+  id UUID,
+  title TEXT,
+  authors TEXT,
+  abstract TEXT,
+  publication_date DATE,
+  doi TEXT,
+  pdf_file_path TEXT,
+  total_pages INTEGER,
+  extracted_text TEXT,
+  metadata JSONB,
+  reading_progress FLOAT,
+  reading_status TEXT,
+  tts_status TEXT,
+  tts_error TEXT,
+  tts_started_at TIMESTAMP WITH TIME ZONE,
+  tts_completed_at TIMESTAMP WITH TIME ZONE,
+  upload_date TIMESTAMP WITH TIME ZONE,
+  last_accessed TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE,
+  updated_at TIMESTAMP WITH TIME ZONE,
+  tag_names TEXT[],
+  tag_colors TEXT[]
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT * FROM papers_with_tags pwt
+  WHERE to_tsvector('english', COALESCE(pwt.title, '') || ' ' || COALESCE(pwt.authors, '') || ' ' || COALESCE(pwt.abstract, ''))
+        @@ plainto_tsquery('english', search_query)
+  ORDER BY pwt.upload_date DESC;
+END;
+$$ LANGUAGE plpgsql;
