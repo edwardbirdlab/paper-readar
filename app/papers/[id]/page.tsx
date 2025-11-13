@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import PaperReader from '@/components/reader/PaperReader';
+import db from '@/lib/db/client';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -8,17 +9,13 @@ interface PageProps {
 export default async function PaperPage({ params }: PageProps) {
   const { id } = await params;
 
-  // Fetch the paper from API
+  // Fetch the paper directly from database (server component)
   try {
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/api/papers/${id}`, {
-      cache: 'no-store' // Always fetch fresh data
-    });
+    const paper = await db.papers.findById(id);
 
-    if (!response.ok) {
+    if (!paper) {
       notFound();
     }
-
-    const paper = await response.json();
 
     return <PaperReader paper={paper} />;
   } catch (error) {

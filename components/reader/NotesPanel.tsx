@@ -185,14 +185,14 @@ export default function NotesPanel({ paperId, currentPage }: NotesPanelProps) {
                   ) : (
                     <div>
                       <button
-                        onClick={() => note.audio_url && playVoiceNote(note.audio_url)}
+                        onClick={() => note.voice_file_path && playVoiceNote(note.voice_file_path)}
                         className="flex items-center space-x-2 px-3 py-2 bg-purple-100 dark:bg-purple-900 hover:bg-purple-200 dark:hover:bg-purple-800 rounded-lg transition-colors"
                       >
                         <Play className="w-4 h-4" />
                         <span className="text-sm">Play voice note</span>
-                        {note.duration && (
+                        {note.voice_duration && (
                           <span className="text-xs text-gray-600 dark:text-gray-400">
-                            ({note.duration}s)
+                            ({note.voice_duration}s)
                           </span>
                         )}
                       </button>

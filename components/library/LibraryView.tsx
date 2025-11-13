@@ -164,10 +164,10 @@ export default function LibraryView({ initialPapers }: LibraryViewProps) {
                     </h3>
                   </Link>
 
-                  {paper.authors && paper.authors.length > 0 && (
+                  {paper.authors && paper.authors.trim().length > 0 && (
                     <div className="flex items-center text-sm text-gray-600 dark:text-gray-400 mb-2">
                       <Users className="w-4 h-4 mr-1" />
-                      <span className="truncate">{paper.authors.join(', ')}</span>
+                      <span className="truncate">{paper.authors}</span>
                     </div>
                   )}
 
@@ -176,9 +176,8 @@ export default function LibraryView({ initialPapers }: LibraryViewProps) {
                     <span>Added {formatDate(paper.created_at)}</span>
                   </div>
 
-                  <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400 pt-4 border-t border-gray-200 dark:border-gray-700">
-                    <span>{paper.page_count || 0} pages</span>
-                    <span>{formatFileSize(paper.file_size)}</span>
+                  <div className="flex items-center text-sm text-gray-500 dark:text-gray-400 pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <span>{paper.total_pages || 0} pages</span>
                   </div>
 
                   {/* Progress bar */}

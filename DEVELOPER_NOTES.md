@@ -237,6 +237,120 @@ paper-reader/
 ### tags, paper_tags, highlights
 Standard structure for tagging and highlighting features.
 
+**📖 See DATABASE_SCHEMA.md for complete schema documentation**
+
+---
+
+## ⚠️ Recent Critical Fixes (2025-11-13)
+
+### Database Schema Audit & v2.0 Migration Completion
+
+A comprehensive audit identified **16 mismatches** between `database/schema.sql` and application code that were causing crashes, 404 errors, and UI bugs. All issues have been resolved.
+
+#### Issues Fixed
+
+**Critical Crashes:**
+1. ✅ TTS worker crash - Missing `tts_error` column in `paper_chunks` table
+2. ✅ Kokoro TTS 500 errors - Invalid `voice` parameter in constructor
+3. ✅ 404 redirects after upload - Paper view page using failing API fetch
+
+**UI Display Bugs:**
+4. ✅ Library showing "0 pages" - Using wrong field name (`page_count` vs `total_pages`)
+5. ✅ Authors not displaying - Treating string as array
+6. ✅ File size errors - Column doesn't exist in v2.0
+7. ✅ Voice notes not playable - Using non-existent `audio_url` field
+8. ✅ Voice note duration missing - Using `duration` instead of `voice_duration`
+
+**Type Safety:**
+9. ✅ TypeScript types out of sync - 14 legacy Supabase v1.0 fields removed
+
+#### Files Changed
+
+- `database/schema.sql` - Added `tts_error` column to `paper_chunks`
+- `services/tts-service/main.py` - Fixed Kokoro initialization
+- `lib/types/database.ts` - Complete rewrite (189 lines) matching schema v2.0
+- `components/library/LibraryView.tsx` - Fixed field references
+- `components/reader/NotesPanel.tsx` - Fixed voice note playback
+- `app/papers/[id]/page.tsx` - Changed to direct DB access
+- `docker-deploy.sh` - Enhanced schema validation (checks all 8 tables)
+- `DATABASE_SCHEMA.md` - New comprehensive schema documentation (447 lines)
+
+#### Important v1.0 → v2.0 Changes
+
+**Removed Fields (legacy Supabase):**
+- `user_id` (all tables) - No longer multi-user
+- `file_size` (papers) - Not tracked
+- `journal`, `pdf_url`, `pdf_storage_path`, `reading_text` (papers)
+- `duration`, `audio_url`, `audio_storage_path` (notes)
+
+**Renamed Fields:**
+- `page_count` → `total_pages`
+- `note.duration` → `note.voice_duration`
+
+**Type Changes:**
+- `authors`: `string[]` → `TEXT` (comma-separated string)
+
+**New Fields:**
+- `paper_chunks.tts_error` - Track TTS failures per chunk
+
+#### Key Learnings
+
+**Always use direct DB access in server components:**
+```typescript
+// ✅ CORRECT - Server component with direct DB access
+import db from '@/lib/db/client';
+const paper = await db.papers.findById(id);
+
+// ❌ WRONG - Server-to-server fetch causes issues
+const response = await fetch(`http://localhost:3000/api/papers/${id}`);
+```
+
+**Authors field is TEXT not array:**
+```typescript
+// ✅ CORRECT
+{paper.authors && paper.authors.trim().length > 0 && (
+  <span>{paper.authors}</span>
+)}
+
+// ❌ WRONG (v1.0 style)
+{paper.authors && paper.authors.length > 0 && (
+  <span>{paper.authors.join(', ')}</span>
+)}
+```
+
+**Use correct field names:**
+- ✅ `total_pages`, `voice_duration`, `voice_file_path`
+- ❌ `page_count`, `duration`, `audio_url`
+
+#### Deployment After Fixes
+
+After pulling these fixes, rebuild containers to apply schema changes:
+
+```bash
+# Pull latest code
+git pull origin main
+
+# Rebuild with fresh database
+./docker-deploy.sh
+
+# Or manual rebuild
+docker-compose down
+docker volume rm paper-readar_postgres_data  # Reinitialize schema
+docker-compose build --no-cache
+docker-compose up -d
+```
+
+The enhanced `docker-deploy.sh` now validates all 8 critical tables and provides helpful error messages if schema initialization fails.
+
+#### Documentation
+
+See **DATABASE_SCHEMA.md** for:
+- Complete table definitions with all columns
+- TypeScript type mappings
+- Common query patterns
+- Troubleshooting guide
+- Full migration notes
+
 ---
 
 ## 🚀 Deployment Guide
@@ -518,8 +632,8 @@ cat backup.sql | docker-compose exec -T postgres psql -U paper_reader paper_read
 
 ---
 
-**Last Updated**: 2025-11-12
-**Version**: 2.0.0 - Local Stack with Kokoro TTS
+**Last Updated**: 2025-11-13
+**Version**: 2.0.0 - Local Stack with Kokoro TTS (Schema Fixed)
 **Architecture**: Fully self-hosted, CPU-optimized, production-ready
 
 Happy reading! 📖🎧

@@ -168,17 +168,52 @@ if [ $WAIT_COUNT -eq $MAX_WAIT ]; then
 else
     echo "   ✓ PostgreSQL is ready"
 
-    # Verify schema was initialized by checking if papers table exists
+    # Verify schema was initialized by checking if critical tables exist
     echo "   Verifying database schema..."
-    if docker compose exec -T postgres psql -U paper_reader -d paper_reader -c '\dt papers' 2>/dev/null | grep -q 'papers'; then
-        echo "   ✓ Database schema initialized successfully"
+
+    # Check if schema.sql file exists and is a file (not directory)
+    if [ ! -f database/schema.sql ]; then
+        echo "   ❌ ERROR: database/schema.sql is missing or not a file!"
+        echo "   This may indicate a Docker mount issue. Run: sudo rm -rf database/ && git pull"
+        exit 1
+    fi
+
+    # Check for all critical tables
+    TABLES=("papers" "paper_chunks" "tags" "paper_tags" "highlights" "notes" "audio_sessions" "reading_history")
+    MISSING_TABLES=()
+
+    for table in "${TABLES[@]}"; do
+        if ! docker compose exec -T postgres psql -U paper_reader -d paper_reader -c "\\dt $table" 2>/dev/null | grep -q "$table"; then
+            MISSING_TABLES+=("$table")
+        fi
+    done
+
+    if [ ${#MISSING_TABLES[@]} -eq 0 ]; then
+        echo "   ✓ Database schema initialized successfully (all tables present)"
     else
-        echo "   ⚠️  Schema not found, initializing manually..."
+        echo "   ⚠️  Missing tables: ${MISSING_TABLES[*]}"
+        echo "   Initializing schema manually..."
         docker compose exec -T postgres psql -U paper_reader -d paper_reader -f /docker-entrypoint-initdb.d/01-schema.sql
         if [ $? -eq 0 ]; then
             echo "   ✓ Manual schema initialization successful"
+
+            # Verify again after initialization
+            STILL_MISSING=()
+            for table in "${MISSING_TABLES[@]}"; do
+                if ! docker compose exec -T postgres psql -U paper_reader -d paper_reader -c "\\dt $table" 2>/dev/null | grep -q "$table"; then
+                    STILL_MISSING+=("$table")
+                fi
+            done
+
+            if [ ${#STILL_MISSING[@]} -eq 0 ]; then
+                echo "   ✓ All tables created successfully"
+            else
+                echo "   ❌ Failed to create tables: ${STILL_MISSING[*]}"
+                exit 1
+            fi
         else
             echo "   ❌ Failed to initialize schema"
+            exit 1
         fi
     fi
 fi

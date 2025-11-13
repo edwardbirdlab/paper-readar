@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS paper_chunks (
   audio_file_path TEXT,
   audio_duration INTEGER, -- Duration in seconds
   tts_status TEXT DEFAULT 'pending' CHECK (tts_status IN ('pending', 'processing', 'completed', 'failed')),
+  tts_error TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   CONSTRAINT unique_paper_chunk UNIQUE (paper_id, chunk_index)

@@ -76,7 +76,6 @@ def load_kokoro_model():
             # Initialize with CPU-optimized settings
             kokoro_model = Kokoro(
                 model_path=MODEL_PATH,
-                voice="af_sarah",  # Default voice
                 num_threads=ONNX_NUM_THREADS
             )
 
