@@ -33,6 +33,26 @@ echo "  - TTS worker"
 echo "  - Next.js app"
 echo ""
 
+# Prompt for deployment mode
+echo "Choose deployment mode:"
+echo "1) Development (with debugging, hot reload, verbose logging)"
+echo "2) Production (optimized, minimal logging)"
+echo ""
+read -p "Enter option (1 or 2) [default: 1]: " MODE_OPTION
+MODE_OPTION=${MODE_OPTION:-1}
+
+if [ "$MODE_OPTION" == "1" ]; then
+    NODE_ENV="development"
+    echo "✅ Development mode selected"
+elif [ "$MODE_OPTION" == "2" ]; then
+    NODE_ENV="production"
+    echo "✅ Production mode selected"
+else
+    echo "❌ Invalid option. Using development mode."
+    NODE_ENV="development"
+fi
+echo ""
+
 # Check if .env exists
 if [ ! -f .env ]; then
     echo "Generating secure credentials..."
@@ -61,7 +81,7 @@ MINIO_ROOT_USER=minioadmin
 MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD
 
 # Application Configuration
-NODE_ENV=development
+NODE_ENV=$NODE_ENV
 
 # TTS Worker Configuration
 WORKER_CONCURRENCY=2
@@ -75,6 +95,17 @@ EOF
     echo "   MinIO: minioadmin / $MINIO_ROOT_PASSWORD"
     echo ""
     echo "   Save these credentials securely!"
+    echo ""
+else
+    echo "📝 .env file already exists"
+    # Update NODE_ENV in existing .env file
+    if grep -q "^NODE_ENV=" .env; then
+        sed -i.bak "s/^NODE_ENV=.*/NODE_ENV=$NODE_ENV/" .env
+        echo "✅ Updated NODE_ENV to $NODE_ENV in existing .env file"
+    else
+        echo "NODE_ENV=$NODE_ENV" >> .env
+        echo "✅ Added NODE_ENV=$NODE_ENV to .env file"
+    fi
     echo ""
 fi
 
