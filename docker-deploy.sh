@@ -126,7 +126,7 @@ $COMPOSE_CMD down
 
 # Remove postgres volume to ensure fresh database initialization
 echo "🗑️  Removing old database volume to reinitialize schema..."
-docker volume rm paper-reader_postgres_data 2>/dev/null || true
+docker volume rm paper-readar_postgres_data 2>/dev/null || true
 
 # Rebuild containers from scratch without cache
 # --build: Build images before starting containers

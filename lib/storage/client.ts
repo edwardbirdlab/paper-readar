@@ -6,10 +6,27 @@
 import { Client as MinioClient, BucketItem } from 'minio';
 import { Readable } from 'stream';
 
+// Parse MinIO endpoint
+const endpoint = process.env.MINIO_ENDPOINT || 'localhost:9000';
+const [endPoint, portStr] = endpoint.split(':');
+const port = parseInt(portStr || '9000', 10);
+
+if (isNaN(port)) {
+  console.error('MinIO configuration error:', {
+    endpoint: process.env.MINIO_ENDPOINT,
+    endPoint,
+    portStr,
+    port
+  });
+  throw new Error(`Invalid MINIO_ENDPOINT port: ${endpoint}. Expected format: hostname:port`);
+}
+
+console.log(`Initializing MinIO client: ${endPoint}:${port} (SSL: ${process.env.MINIO_USE_SSL === 'true'})`);
+
 // Initialize MinIO client
 const minioClient = new MinioClient({
-  endPoint: (process.env.MINIO_ENDPOINT || 'localhost:9000').split(':')[0],
-  port: parseInt((process.env.MINIO_ENDPOINT || 'localhost:9000').split(':')[1] || '9000'),
+  endPoint: endPoint || 'localhost',
+  port,
   useSSL: process.env.MINIO_USE_SSL === 'true',
   accessKey: process.env.MINIO_ACCESS_KEY || 'minioadmin',
   secretKey: process.env.MINIO_SECRET_KEY || 'minioadmin'
