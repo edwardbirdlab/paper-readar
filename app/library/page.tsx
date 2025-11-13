@@ -1,19 +1,11 @@
 import LibraryView from '@/components/library/LibraryView';
+import db from '@/lib/db/client';
 
 export default async function LibraryPage() {
-  // Fetch papers from API
+  // Fetch papers directly from database (server component)
   try {
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/api/papers`, {
-      cache: 'no-store' // Always fetch fresh data
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch papers');
-    }
-
-    const data = await response.json();
-
-    return <LibraryView initialPapers={data.papers || []} />;
+    const papers = await db.papers.list();
+    return <LibraryView initialPapers={papers} />;
   } catch (error) {
     console.error('Error fetching papers:', error);
     return <LibraryView initialPapers={[]} />;

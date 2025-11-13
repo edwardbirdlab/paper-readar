@@ -5,10 +5,28 @@
 
 import { Queue, QueueEvents } from 'bullmq';
 
+// Parse Redis URL
+const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+const redisUrlWithoutProtocol = redisUrl.replace('redis://', '');
+const [host, portStr] = redisUrlWithoutProtocol.split(':');
+const port = parseInt(portStr || '6379', 10);
+
+if (isNaN(port)) {
+  console.error('Redis configuration error:', {
+    redisUrl: process.env.REDIS_URL,
+    host,
+    portStr,
+    port
+  });
+  throw new Error(`Invalid REDIS_URL port: ${redisUrl}. Expected format: redis://hostname:port`);
+}
+
+console.log(`Initializing Redis connection: ${host}:${port}`);
+
 // Redis configuration
 const redisConnection = {
-  host: (process.env.REDIS_URL || 'redis://localhost:6379').replace('redis://', '').split(':')[0],
-  port: parseInt((process.env.REDIS_URL || 'redis://localhost:6379').split(':')[1] || '6379')
+  host: host || 'localhost',
+  port
 };
 
 /**
