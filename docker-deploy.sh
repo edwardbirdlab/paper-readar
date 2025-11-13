@@ -61,7 +61,7 @@ MINIO_ROOT_USER=minioadmin
 MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD
 
 # Application Configuration
-NODE_ENV=production
+NODE_ENV=development
 
 # TTS Worker Configuration
 WORKER_CONCURRENCY=2
