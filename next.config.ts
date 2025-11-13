@@ -4,10 +4,20 @@ import withPWA from "@ducanh2912/next-pwa";
 const nextConfig: NextConfig = {
   /* config options here */
   output: "standalone", // Enable standalone output for Docker
-  turbopack: {}, // Add empty turbopack config to silence warning
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
+    // Exclude canvas and encoding from client-side bundle
     config.resolve.alias.canvas = false;
     config.resolve.alias.encoding = false;
+
+    // Ignore node-specific modules in client bundle
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        canvas: false,
+        encoding: false,
+      };
+    }
+
     return config;
   },
 };
