@@ -8,7 +8,7 @@ A Progressive Web App for reading, annotating, and listening to scientific paper
 
 - **📄 PDF Upload & Management**
   - Drag-and-drop PDF upload interface
-  - Cloud storage with Supabase
+  - MinIO S3-compatible object storage
   - Automatic metadata extraction (title, authors, page count)
   - File size and page count tracking
 
@@ -28,7 +28,7 @@ A Progressive Web App for reading, annotating, and listening to scientific paper
   - Record voice notes during reading or listening
   - Automatic syncing to current text position
   - Context capture (text being read when note was created)
-  - Cloud storage for audio files
+  - MinIO object storage for audio files
 
 - **📝 Text Notes**
   - Add text notes to specific pages
@@ -75,12 +75,14 @@ A Progressive Web App for reading, annotating, and listening to scientific paper
 - **Frontend Framework**: Next.js 14+ (App Router)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS
-- **Database**: PostgreSQL (Supabase)
-- **Authentication**: Supabase Auth
-- **Storage**: Supabase Storage
+- **Database**: PostgreSQL 16
+- **Object Storage**: MinIO (S3-compatible)
+- **Job Queue**: Redis + BullMQ
+- **TTS Engine**: Kokoro-82M (CPU-optimized, #1 ranked quality)
 - **PDF Processing**: PDF.js
 - **Icons**: Lucide React
 - **PWA**: @ducanh2912/next-pwa
+- **Deployment**: Docker + Docker Compose
 
 ## Deployment Options
 
@@ -92,7 +94,7 @@ A Progressive Web App for reading, annotating, and listening to scientific paper
 
 Quick start with Docker:
 ```bash
-# Simple deployment (app + cloud Supabase)
+# Deploy the full self-hosted stack
 docker-compose up -d
 
 # Or use the deployment script
@@ -100,11 +102,13 @@ docker-compose up -d
 ```
 
 **What you get with Docker:**
-- ✅ One-command deployment
+- ✅ One-command deployment of complete stack
 - ✅ Automatic container management
 - ✅ Easy updates and rollbacks
-- ✅ Optional local Supabase instance
+- ✅ No external dependencies (fully self-hosted)
 - ✅ Perfect for home lab/Portainer setups
+- ✅ Automatic database initialization
+- ✅ Automatic MinIO bucket setup
 
 ### 💻 Local Development
 
@@ -113,7 +117,8 @@ docker-compose up -d
 ### Prerequisites
 
 - Node.js 18+ and npm
-- A Supabase account ([supabase.com](https://supabase.com))
+- Docker and Docker Compose (for self-hosted deployment)
+- PostgreSQL, MinIO, and Redis (if running locally without Docker)
 
 ### 1. Clone the Repository
 
@@ -128,15 +133,25 @@ cd paper-reader
 npm install
 ```
 
-### 3. Set Up Supabase
+### 3. Set Up Backend Services
 
-1. Create a new project at [supabase.com](https://supabase.com)
-2. Run the SQL schema from `supabase/schema.sql` in the Supabase SQL Editor
-3. Create storage buckets:
-   - `papers` (for PDF files)
-   - `voice-notes` (for audio recordings)
-   - `tts-audio` (for pre-processed TTS audio)
-4. Configure storage policies as described in `supabase/README.md`
+**Option A: Using Docker (Recommended)**
+```bash
+# Start all services with Docker Compose
+docker-compose up -d
+```
+
+This automatically sets up:
+- PostgreSQL database with schema
+- MinIO object storage with buckets
+- Redis job queue
+- TTS service and worker
+
+**Option B: Local Services**
+1. Install and run PostgreSQL, MinIO, and Redis locally
+2. Run the database schema from `database/schema.sql`
+3. Create MinIO buckets: `papers`, `audio`
+4. Configure service URLs in `.env.local`
 
 ### 4. Configure Environment Variables
 
@@ -144,15 +159,19 @@ npm install
 cp .env.example .env.local
 ```
 
-Edit `.env.local` and add your Supabase credentials:
+Edit `.env.local` and configure your services:
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+# Database Configuration
+POSTGRES_PASSWORD=your_secure_password
 
-# TTS Service (if using custom service)
-NEXT_PUBLIC_TTS_API_URL=http://localhost:8000/api/tts
-TTS_API_KEY=your-tts-api-key
+# MinIO Configuration
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=your_minio_password
+
+# TTS Worker Configuration
+WORKER_CONCURRENCY=2
+CPU_CORES=8
 ```
 
 ### 5. Run the Development Server
@@ -161,7 +180,7 @@ TTS_API_KEY=your-tts-api-key
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open [http://localhost:3001](http://localhost:3001) in your browser.
 
 ### 6. Build for Production
 
@@ -192,10 +211,17 @@ paper-reader/
 │   │   └── PaperReader.tsx       # Main reader
 │   └── upload/                   # Upload components
 ├── lib/                          # Utilities and types
-│   ├── supabase/                 # Supabase clients
+│   ├── db/                       # PostgreSQL client
+│   ├── storage/                  # MinIO client
+│   ├── queue/                    # BullMQ client
+│   ├── utils/                    # Utilities (chunking, etc.)
 │   └── types/                    # TypeScript types
+├── services/                     # Backend services
+│   ├── tts-service/              # Kokoro TTS FastAPI service
+│   └── tts-worker/               # BullMQ background worker
+├── database/                     # Database schema
+│   └── schema.sql                # PostgreSQL schema
 ├── public/                       # Static assets
-├── supabase/                     # Database schema
 ├── next.config.ts                # Next.js config
 └── tailwind.config.ts            # Tailwind config
 ```
@@ -241,21 +267,25 @@ paper-reader/
 
 The app uses PostgreSQL with the following main tables:
 
-- `papers` - Stores paper metadata and extracted text
+- `papers` - Stores paper metadata, TTS status, and extracted text
+- `paper_chunks` - Text chunks for TTS processing
 - `tags` - Custom tags for organizing papers
 - `paper_tags` - Many-to-many relationship for tags
 - `highlights` - Text selections and highlights
-- `notes` - Text and voice notes
+- `notes` - Text and voice notes with position data
 - `audio_sessions` - TTS playback sessions
 - `reading_history` - Reading progress tracking
 
-All tables have Row Level Security (RLS) enabled to ensure users can only access their own data.
+See `database/schema.sql` for the complete schema.
 
 ## API Routes
 
 ### Papers
 
-- `POST /api/papers/upload` - Upload a PDF
+- `GET /api/papers` - List all papers
+- `POST /api/papers/upload` - Upload a PDF (triggers chunking and TTS processing)
+- `GET /api/papers/[id]` - Get specific paper
+- `GET /api/papers/[id]/chunks` - Get paper chunks with audio URLs
 - `GET /api/papers/[id]/notes` - Get notes for a paper
 - `DELETE /api/papers/[id]` - Delete a paper
 
@@ -265,29 +295,34 @@ All tables have Row Level Security (RLS) enabled to ensure users can only access
 - `POST /api/notes/voice` - Create a voice note
 - `DELETE /api/notes/[id]` - Delete a note
 
-## Self-Hosting TTS Service
+## TTS Processing Architecture
 
-The app currently uses browser-native text-to-speech. For better quality, you can integrate a custom TTS service:
+The app uses **Kokoro-82M**, the #1 ranked TTS model for quality, optimized for CPU-only hardware:
 
-1. Set up your TTS service (e.g., Coqui TTS, Mozilla TTS, or commercial APIs)
-2. Configure the API endpoint in `.env.local`
-3. Implement the API client in `lib/tts/client.ts`
-4. Update the AudioPlayer component to use your service
+### How it Works
 
-Example TTS service interface:
+1. **Upload**: User uploads PDF
+2. **Chunking**: Text is extracted and split into ~500-word chunks (`lib/utils/chunking.ts`)
+3. **Queueing**: Chunks are queued in Redis via BullMQ
+4. **Processing**: TTS worker (`services/tts-worker`) processes jobs:
+   - Calls Kokoro TTS service (`services/tts-service`)
+   - Uploads generated WAV audio to MinIO
+   - Updates database with audio URLs
+5. **Playback**: Frontend fetches chunks with audio URLs and plays sequentially
 
-```typescript
-POST /api/tts/generate
-{
-  "text": "Paper text...",
-  "voice": "en-US-neural",
-  "speed": 1.0
-}
+### Performance
 
-Response:
-{
-  "audio_url": "https://..."
-}
+- **Speed**: RTF 0.15-0.3 (generates 3-7x faster than playback)
+- **Quality**: #1 ranked in TTS Arena blind tests
+- **Resource**: CPU-optimized, ~2GB RAM per worker
+- **Typical Paper**: 20 pages = 15 chunks = ~70 min audio = ~10 min processing
+
+### Customization
+
+Configure worker concurrency and CPU cores in `.env`:
+```env
+WORKER_CONCURRENCY=2  # Number of parallel TTS jobs
+CPU_CORES=8           # ONNX thread count
 ```
 
 ## Future Enhancements

@@ -3,175 +3,162 @@ version: '3.8'
 services:
   # PostgreSQL Database
   postgres:
-    image: supabase/postgres:15.1.0.117
-    container_name: paper-reader-db
+    image: postgres:16-alpine
+    container_name: paper-reader-postgres
     restart: unless-stopped
-    ports:
-      - "5432:5432"
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your-super-secret-password}
-      POSTGRES_DB: postgres
+      POSTGRES_DB: paper_reader
+      POSTGRES_USER: paper_reader
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./supabase/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
     networks:
       - paper-reader-network
+    ports:
+      - "3002:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U paper_reader"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
-  # Supabase Studio (Database UI)
-  studio:
-    image: supabase/studio:20231123-64a766a
-    container_name: paper-reader-studio
+  # MinIO Object Storage (S3-compatible)
+  minio:
+    image: minio/minio:latest
+    container_name: paper-reader-minio
     restart: unless-stopped
-    ports:
-      - "3001:3000"
+    command: server /data --console-address ":9001"
     environment:
-      SUPABASE_URL: http://kong:8000
-      STUDIO_PG_META_URL: http://meta:8080
-      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
-      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
-    networks:
-      - paper-reader-network
-    depends_on:
-      - postgres
-
-  # Supabase Kong API Gateway
-  kong:
-    image: kong:2.8.1
-    container_name: paper-reader-kong
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-      - "8443:8443"
-    environment:
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
-      KONG_DNS_ORDER: LAST,A,CNAME
-      KONG_PLUGINS: request-transformer,cors,key-auth,acl
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     volumes:
-      - ./supabase/kong.yml:/var/lib/kong/kong.yml
+      - minio_data:/data
     networks:
       - paper-reader-network
-    depends_on:
-      - postgres
+    ports:
+      - "3003:9000"  # S3 API
+      - "3004:9001"  # Web Console
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
 
-  # Supabase Auth
-  auth:
-    image: supabase/gotrue:v2.132.3
-    container_name: paper-reader-auth
-    restart: unless-stopped
-    environment:
-      GOTRUE_API_HOST: 0.0.0.0
-      GOTRUE_API_PORT: 9999
-      API_EXTERNAL_URL: ${API_EXTERNAL_URL:-http://localhost:8000}
-      GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD:-your-super-secret-password}@postgres:5432/postgres
-      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost:3000}
-      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS:-}
-      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
-      GOTRUE_JWT_ADMIN_ROLES: service_role
-      GOTRUE_JWT_AUD: authenticated
-      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
-      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
-      GOTRUE_JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-token-with-at-least-32-characters-long}
-      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP:-true}
-      GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM:-true}
+  # MinIO Client - Initialize buckets on startup
+  minio-init:
+    image: minio/mc:latest
+    container_name: paper-reader-minio-init
+    depends_on:
+      - minio
     networks:
       - paper-reader-network
-    depends_on:
-      - postgres
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin};
+      mc mb myminio/papers --ignore-existing;
+      mc mb myminio/audio --ignore-existing;
+      mc anonymous set download myminio/papers;
+      mc anonymous set download myminio/audio;
+      exit 0;
+      "
 
-  # Supabase REST API
-  rest:
-    image: postgrest/postgrest:v11.2.2
-    container_name: paper-reader-rest
+  # Redis - Job Queue Backend
+  redis:
+    image: redis:7-alpine
+    container_name: paper-reader-redis
     restart: unless-stopped
-    environment:
-      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD:-your-super-secret-password}@postgres:5432/postgres
-      PGRST_DB_SCHEMAS: public,storage,graphql_public
-      PGRST_DB_ANON_ROLE: anon
-      PGRST_JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-token-with-at-least-32-characters-long}
-      PGRST_DB_USE_LEGACY_GUCS: "false"
     networks:
       - paper-reader-network
-    depends_on:
-      - postgres
-
-  # Supabase Storage
-  storage:
-    image: supabase/storage-api:v0.40.4
-    container_name: paper-reader-storage
-    restart: unless-stopped
-    environment:
-      ANON_KEY: ${SUPABASE_ANON_KEY}
-      SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
-      POSTGREST_URL: http://rest:3000
-      PGRST_JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-token-with-at-least-32-characters-long}
-      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD:-your-super-secret-password}@postgres:5432/postgres
-      FILE_SIZE_LIMIT: 52428800
-      STORAGE_BACKEND: file
-      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
-      TENANT_ID: stub
-      REGION: stub
-      GLOBAL_S3_BUCKET: stub
+    ports:
+      - "3005:6379"
     volumes:
-      - storage-data:/var/lib/storage
-    networks:
-      - paper-reader-network
-    depends_on:
-      - postgres
-      - rest
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Supabase Meta (Database Management)
-  meta:
-    image: supabase/postgres-meta:v0.68.0
-    container_name: paper-reader-meta
+  # Kokoro TTS Service
+  tts-service:
+    build:
+      context: ./services/tts-service
+      dockerfile: Dockerfile
+    container_name: paper-reader-tts-service
     restart: unless-stopped
     environment:
-      PG_META_PORT: 8080
-      PG_META_DB_HOST: postgres
-      PG_META_DB_PORT: 5432
-      PG_META_DB_NAME: postgres
-      PG_META_DB_USER: supabase_admin
-      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD:-your-super-secret-password}
+      - ONNX_NUM_THREADS=${CPU_CORES:-8}
+      - MODEL_PATH=/app/models
+    volumes:
+      - tts_models:/app/models
     networks:
       - paper-reader-network
+    ports:
+      - "3006:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # TTS Worker - Background job processor
+  tts-worker:
+    build:
+      context: ./services/tts-worker
+      dockerfile: Dockerfile
+    container_name: paper-reader-tts-worker
+    restart: unless-stopped
     depends_on:
+      - redis
       - postgres
+      - minio
+      - tts-service
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://paper_reader:${POSTGRES_PASSWORD:-changeme}@postgres:5432/paper_reader
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - TTS_SERVICE_URL=http://tts-service:8000
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-2}
+    networks:
+      - paper-reader-network
 
   # Next.js Paper Reader App
-  paper-reader:
+  app:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: paper-reader-app
     restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-      - NEXT_PUBLIC_SUPABASE_URL=http://localhost:8000
-      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      - NEXT_PUBLIC_TTS_API_URL=${NEXT_PUBLIC_TTS_API_URL:-http://localhost:8000/api/tts}
-      - TTS_API_KEY=${TTS_API_KEY:-}
-    networks:
-      - paper-reader-network
     depends_on:
       - postgres
-      - kong
-      - auth
-      - rest
-      - storage
+      - minio
+      - redis
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://paper_reader:${POSTGRES_PASSWORD:-changeme}@postgres:5432/paper_reader
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_USE_SSL=false
+      - REDIS_URL=redis://redis:6379
+      - TTS_SERVICE_URL=http://tts-service:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+    networks:
+      - paper-reader-network
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
 
 volumes:
-  postgres-data:
-    driver: local
-  storage-data:
-    driver: local
+  postgres_data:
+  minio_data:
+  redis_data:
+  tts_models:
 
 networks:
   paper-reader-network:

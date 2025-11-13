@@ -2,23 +2,33 @@
 
 Quick reference for managing your Paper Reader deployment.
 
+## 📍 Port Mapping
+
+All services use sequential ports starting from 3001:
+- **App**: http://localhost:3001
+- **PostgreSQL**: localhost:3002
+- **MinIO API**: http://localhost:3003
+- **MinIO Console**: http://localhost:3004
+- **Redis**: localhost:3005
+- **TTS Service**: http://localhost:3006/health
+
 ## 🚀 Basic Operations
 
 ### Start the App
 ```bash
-# Simple deployment
+# Start all services
 docker-compose up -d
 
-# Full stack deployment
+# Or use full-stack file (identical to docker-compose.yml)
 docker-compose -f docker-compose.full-stack.yml up -d
 ```
 
 ### Stop the App
 ```bash
-# Simple deployment
+# Stop all services
 docker-compose down
 
-# Full stack deployment
+# Stop with full-stack file
 docker-compose -f docker-compose.full-stack.yml down
 ```
 
@@ -99,10 +109,10 @@ docker exec paper-reader ls -la
 ### Backup Database (Full Stack)
 ```bash
 # Backup to file
-docker exec paper-reader-db pg_dump -U postgres postgres > backup_$(date +%Y%m%d).sql
+docker exec paper-reader-postgres pg_dump -U paper_reader paper_reader > backup_$(date +%Y%m%d).sql
 
 # Restore from backup
-docker exec -i paper-reader-db psql -U postgres postgres < backup_20240101.sql
+docker exec -i paper-reader-postgres psql -U paper_reader paper_reader < backup_20240101.sql
 ```
 
 ### Backup Storage Files
@@ -163,7 +173,7 @@ docker network inspect paper-reader_paper-reader-network
 ### Access Database
 ```bash
 # Full stack only
-docker exec -it paper-reader-db psql -U postgres
+docker exec -it paper-reader-postgres psql -U postgres
 ```
 
 ### Check Environment Variables
@@ -174,7 +184,7 @@ docker exec paper-reader env
 ### Test Container Networking
 ```bash
 # From app container to database
-docker exec paper-reader ping paper-reader-db
+docker exec paper-reader ping paper-reader-postgres
 
 # From app container to internet
 docker exec paper-reader ping google.com
@@ -302,7 +312,7 @@ DATE=$(date +%Y%m%d_%H%M%S)
 mkdir -p "$BACKUP_DIR"
 
 echo "Backing up database..."
-docker exec paper-reader-db pg_dump -U postgres postgres > "$BACKUP_DIR/db_$DATE.sql"
+docker exec paper-reader-postgres pg_dump -U paper_reader paper_reader > "$BACKUP_DIR/db_$DATE.sql"
 
 echo "Backing up storage..."
 docker run --rm -v paper-reader_storage-data:/data -v "$BACKUP_DIR":/backup alpine tar czf /backup/storage_$DATE.tar.gz -C /data .
@@ -345,4 +355,4 @@ This checks daily and auto-updates containers.
 | Status | `docker-compose ps` |
 | Stats | `docker stats` |
 | Shell | `docker exec -it paper-reader sh` |
-| Backup DB | `docker exec paper-reader-db pg_dump -U postgres postgres > backup.sql` |
+| Backup DB | `docker exec paper-reader-postgres pg_dump -U paper_reader paper_reader > backup.sql` |

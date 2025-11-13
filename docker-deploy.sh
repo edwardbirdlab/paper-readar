@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Scientific Paper Reader - Docker Deployment Script
-# This script helps you deploy the app quickly
+# This script helps you deploy the self-hosted stack quickly
 
 set -e
 
@@ -22,124 +22,97 @@ if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/
     exit 1
 fi
 
-# Deployment options
-echo "Choose deployment option:"
-echo "1) Simple (App + Cloud Supabase) - Recommended"
-echo "2) Full Stack (App + Local Supabase)"
+echo "📋 Self-Hosted Stack Deployment"
 echo ""
-read -p "Enter option (1 or 2): " OPTION
+echo "This will deploy the complete stack including:"
+echo "  - PostgreSQL database"
+echo "  - MinIO object storage (S3-compatible)"
+echo "  - Redis job queue"
+echo "  - Kokoro TTS service"
+echo "  - TTS worker"
+echo "  - Next.js app"
+echo ""
 
-if [ "$OPTION" == "1" ]; then
+# Check if .env exists
+if [ ! -f .env ]; then
+    echo "Generating secure credentials..."
+
+    # Generate secure passwords
+    POSTGRES_PASSWORD=$(openssl rand -base64 32)
+    MINIO_ROOT_PASSWORD=$(openssl rand -base64 24)
+
     echo ""
-    echo "📋 Simple Deployment Selected"
-    echo ""
-    echo "Before proceeding, make sure you have:"
-    echo "  1. Created a Supabase project at supabase.com"
-    echo "  2. Run the database schema (supabase/schema.sql)"
-    echo "  3. Created storage buckets (papers, voice-notes, tts-audio)"
-    echo ""
-    read -p "Have you completed these steps? (y/n): " READY
+    echo "Creating .env file with generated credentials..."
 
-    if [ "$READY" != "y" ]; then
-        echo "Please complete the setup steps first. See DOCKER_DEPLOYMENT.md for details."
-        exit 0
-    fi
+    cat > .env << EOF
+# Port Mapping (External:Internal)
+# App: 3001:3000
+# PostgreSQL: 3002:5432
+# MinIO API: 3003:9000
+# MinIO Console: 3004:9001
+# Redis: 3005:6379
+# TTS Service: 3006:8000
 
-    # Check if .env exists
-    if [ ! -f .env ]; then
-        echo ""
-        echo "Creating .env file..."
-        read -p "Enter your Supabase URL: " SUPABASE_URL
-        read -p "Enter your Supabase Anon Key: " SUPABASE_KEY
+# Database Configuration
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 
-        cat > .env << EOF
-NEXT_PUBLIC_SUPABASE_URL=$SUPABASE_URL
-NEXT_PUBLIC_SUPABASE_ANON_KEY=$SUPABASE_KEY
-NEXT_PUBLIC_TTS_API_URL=http://localhost:8000/api/tts
-TTS_API_KEY=
+# MinIO Configuration
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD
+
+# Application Configuration
+NODE_ENV=production
+
+# TTS Worker Configuration
+WORKER_CONCURRENCY=2
+CPU_CORES=8
 EOF
-        echo "✅ .env file created"
-    fi
 
+    echo "✅ .env file created with secure credentials"
     echo ""
-    echo "🚀 Building and starting containers..."
-    docker-compose up -d --build
-
+    echo "📝 Important: Your generated passwords are:"
+    echo "   PostgreSQL: $POSTGRES_PASSWORD"
+    echo "   MinIO: minioadmin / $MINIO_ROOT_PASSWORD"
     echo ""
-    echo "✅ Deployment complete!"
+    echo "   Save these credentials securely!"
     echo ""
-    echo "Access your app at: http://localhost:3000"
-    echo ""
-    echo "To view logs: docker-compose logs -f"
-    echo "To stop: docker-compose down"
-
-elif [ "$OPTION" == "2" ]; then
-    echo ""
-    echo "📋 Full Stack Deployment Selected"
-    echo ""
-
-    # Check if .env exists
-    if [ ! -f .env ]; then
-        echo "Generating secure credentials..."
-
-        # Generate secure passwords
-        POSTGRES_PASSWORD=$(openssl rand -base64 32)
-        JWT_SECRET=$(openssl rand -base64 48)
-
-        echo ""
-        echo "Creating .env file with generated credentials..."
-        cp .env.docker .env
-
-        # Replace placeholders
-        sed -i.bak "s/your-super-secret-password/$POSTGRES_PASSWORD/g" .env
-        sed -i.bak "s/your-super-secret-jwt-token-with-at-least-32-characters-long/$JWT_SECRET/g" .env
-
-        # Update URLs
-        read -p "Enter your server IP (or press Enter for localhost): " SERVER_IP
-        SERVER_IP=${SERVER_IP:-localhost}
-
-        sed -i.bak "s/localhost/$SERVER_IP/g" .env
-
-        rm .env.bak
-
-        echo "✅ .env file created with secure credentials"
-    fi
-
-    echo ""
-    echo "🚀 Building and starting full stack..."
-    echo "This may take a few minutes..."
-
-    docker-compose -f docker-compose.full-stack.yml up -d --build
-
-    echo ""
-    echo "⏳ Waiting for services to be healthy..."
-    sleep 10
-
-    echo ""
-    echo "📊 Initializing database schema..."
-    docker exec paper-reader-db psql -U postgres -d postgres -f /docker-entrypoint-initdb.d/schema.sql || echo "Note: Schema may already be initialized"
-
-    echo ""
-    echo "✅ Full stack deployment complete!"
-    echo ""
-    echo "Access your apps at:"
-    echo "  - Paper Reader: http://$SERVER_IP:3000"
-    echo "  - Supabase Studio: http://$SERVER_IP:3001"
-    echo "  - Supabase API: http://$SERVER_IP:8000"
-    echo ""
-    echo "⚠️  IMPORTANT: Create storage buckets in Supabase Studio:"
-    echo "  1. Open http://$SERVER_IP:3001"
-    echo "  2. Go to Storage → Create bucket"
-    echo "  3. Create: papers, voice-notes, tts-audio"
-    echo "  4. Apply storage policies from supabase/README.md"
-    echo ""
-    echo "To view logs: docker-compose -f docker-compose.full-stack.yml logs -f"
-    echo "To stop: docker-compose -f docker-compose.full-stack.yml down"
-
-else
-    echo "Invalid option. Please run the script again."
-    exit 1
 fi
 
+echo "🚀 Building and starting all services..."
+echo "This may take a few minutes on first run..."
+echo ""
+
+# Use docker-compose or docker compose depending on what's available
+if command -v docker-compose &> /dev/null; then
+    COMPOSE_CMD="docker-compose"
+else
+    COMPOSE_CMD="docker compose"
+fi
+
+$COMPOSE_CMD up -d --build
+
+echo ""
+echo "⏳ Waiting for services to be healthy..."
+sleep 15
+
+echo ""
+echo "✅ Deployment complete!"
+echo ""
+echo "Access your services at:"
+echo "  - Paper Reader App:  http://localhost:3001"
+echo "  - MinIO Console:     http://localhost:3004"
+echo "  - PostgreSQL:        localhost:3002"
+echo "  - Redis:             localhost:3005"
+echo "  - TTS Service:       http://localhost:3006/health"
+echo ""
+echo "📦 MinIO buckets (papers, audio) are automatically created"
+echo "📊 Database schema is automatically initialized"
+echo ""
+echo "Useful commands:"
+echo "  View logs:           $COMPOSE_CMD logs -f"
+echo "  View specific logs:  $COMPOSE_CMD logs -f app"
+echo "  Stop services:       $COMPOSE_CMD down"
+echo "  Restart:             $COMPOSE_CMD restart"
 echo ""
 echo "📚 For more details, see DOCKER_DEPLOYMENT.md"
+echo ""

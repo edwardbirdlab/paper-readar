@@ -276,9 +276,21 @@ Standard structure for tagging and highlighting features.
    ```
 
 5. **Access services**
-   - App: http://localhost:3000
-   - MinIO Console: http://localhost:9001
-   - Database: localhost:5432
+   - App: http://localhost:3001
+   - MinIO Console: http://localhost:3004
+   - PostgreSQL: localhost:3002
+   - Redis: localhost:3005
+   - TTS Service: http://localhost:3006/health
+
+### Port Mapping
+
+All services use sequential ports starting from 3001:
+- App: **3001** (mapped from internal 3000)
+- PostgreSQL: **3002** (mapped from internal 5432)
+- MinIO API: **3003** (mapped from internal 9000)
+- MinIO Console: **3004** (mapped from internal 9001)
+- Redis: **3005** (mapped from internal 6379)
+- TTS Service: **3006** (mapped from internal 8000)
 
 ### First Time Setup
 
@@ -326,7 +338,7 @@ cp .env.example .env.local
 # Run dev server
 npm run dev
 
-# App runs on http://localhost:3000
+# App runs on http://localhost:3001
 ```
 
 ### Making Changes

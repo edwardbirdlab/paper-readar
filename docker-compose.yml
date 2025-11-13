@@ -16,7 +16,7 @@ services:
     networks:
       - paper-reader-network
     ports:
-      - "5432:5432"
+      - "3002:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U paper_reader"]
       interval: 10s
@@ -37,8 +37,8 @@ services:
     networks:
       - paper-reader-network
     ports:
-      - "9000:9000"  # S3 API
-      - "9001:9001"  # Web Console
+      - "3003:9000"  # S3 API
+      - "3004:9001"  # Web Console
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
@@ -72,7 +72,7 @@ services:
     networks:
       - paper-reader-network
     ports:
-      - "6379:6379"
+      - "3005:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -96,7 +96,7 @@ services:
     networks:
       - paper-reader-network
     ports:
-      - "8001:8000"
+      - "3006:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -138,7 +138,7 @@ services:
       - minio
       - redis
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://paper_reader:${POSTGRES_PASSWORD:-changeme}@postgres:5432/paper_reader
@@ -148,7 +148,7 @@ services:
       - MINIO_USE_SSL=false
       - REDIS_URL=redis://redis:6379
       - TTS_SERVICE_URL=http://tts-service:8000
-      - NEXT_PUBLIC_API_URL=http://localhost:3000
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
     networks:
       - paper-reader-network
     labels:

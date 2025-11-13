@@ -2,370 +2,405 @@
 
 This guide will help you deploy the Scientific Paper Reader app on your home lab server using Docker and Portainer.
 
-## 📦 Deployment Options
+## 📦 Overview
 
-You have two deployment options:
+The complete self-hosted stack includes:
+- **PostgreSQL** - Database for papers, chunks, and notes
+- **MinIO** - S3-compatible object storage for PDFs and audio
+- **Redis** - Job queue backend
+- **Kokoro TTS Service** - High-quality CPU-optimized TTS
+- **TTS Worker** - Background processor for generating audio
+- **Next.js App** - Web application frontend and API
 
-1. **Simple Deployment** - App only, using cloud Supabase (recommended for beginners)
-2. **Full Stack Deployment** - App + Local Supabase instance (complete self-hosted)
+**No external dependencies required** - everything runs on your hardware.
+
+## 📍 Port Mapping
+
+All services use sequential ports starting from 3001:
+- **App**: http://localhost:3001
+- **PostgreSQL**: localhost:3002
+- **MinIO API**: http://localhost:3003
+- **MinIO Console**: http://localhost:3004 (admin interface)
+- **Redis**: localhost:3005
+- **TTS Service**: http://localhost:3006/health
 
 ---
 
-## Option 1: Simple Deployment (App + Cloud Supabase)
+## 🚀 Quick Start Deployment
 
 ### Prerequisites
 - Docker and Docker Compose installed
-- Portainer running
-- Supabase cloud account (free tier available at [supabase.com](https://supabase.com))
+- ~4GB RAM available
+- ~20GB disk space for images and data
+- Multi-core CPU (recommended for TTS performance)
 
-### Step 1: Set Up Cloud Supabase
-
-1. Go to [supabase.com](https://supabase.com) and create a free account
-2. Create a new project
-3. In the SQL Editor, run the schema from `supabase/schema.sql`
-4. Create storage buckets (Settings → Storage):
-   - `papers` (for PDF files)
-   - `voice-notes` (for audio recordings)
-   - `tts-audio` (for pre-processed TTS)
-5. Configure storage policies as described in `supabase/README.md`
-6. Get your credentials from Settings → API:
-   - Project URL
-   - Anon/public key
-
-### Step 2: Configure Environment Variables
-
-Create a `.env` file in the project root:
+### Step 1: Clone the Repository
 
 ```bash
-# Supabase Configuration (from your cloud project)
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
-
-# TTS Service (optional)
-NEXT_PUBLIC_TTS_API_URL=http://localhost:8000/api/tts
-TTS_API_KEY=
+git clone https://github.com/edwardbirdlab/paper-reader.git
+cd paper-reader
 ```
 
-### Step 3: Deploy with Portainer
+### Step 2: Configure Environment
 
-#### Method A: Using Portainer UI
+The deployment script will generate secure credentials automatically, or you can create `.env` manually:
 
-1. Open Portainer
-2. Go to **Stacks** → **Add stack**
-3. Name it: `paper-reader`
-4. Choose **Upload** and select `docker-compose.yml`
-5. In **Environment variables**, paste your `.env` content
-6. Click **Deploy the stack**
+```bash
+cp .env.example .env
+```
 
-#### Method B: Using Portainer Git Deploy
+Edit `.env` and set your passwords:
 
-1. Open Portainer
-2. Go to **Stacks** → **Add stack**
-3. Name it: `paper-reader`
-4. Choose **Repository**
-5. Enter your repository URL
-6. Set compose file path: `docker-compose.yml`
-7. Add environment variables
-8. Click **Deploy the stack**
+```env
+# Port Mapping (External:Internal)
+# App: 3001:3000
+# PostgreSQL: 3002:5432
+# MinIO API: 3003:9000
+# MinIO Console: 3004:9001
+# Redis: 3005:6379
+# TTS Service: 3006:8000
 
-### Step 4: Access Your App
+# Database Configuration
+POSTGRES_PASSWORD=your_secure_password_here
 
-- App: `http://your-server-ip:3000`
+# MinIO Configuration
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=your_minio_password_here
+
+# Application Configuration
+NODE_ENV=production
+
+# TTS Worker Configuration
+WORKER_CONCURRENCY=2  # Parallel TTS jobs (set to CPU cores / 2)
+CPU_CORES=8           # ONNX thread count (set to your CPU core count)
+```
+
+### Step 3: Deploy
+
+**Option A: Using the deployment script (recommended)**
+
+```bash
+chmod +x docker-deploy.sh
+./docker-deploy.sh
+```
+
+This will:
+- Generate secure credentials
+- Start all services
+- Initialize database schema
+- Create MinIO buckets
+- Display access URLs
+
+**Option B: Manual deployment**
+
+```bash
+docker-compose up -d --build
+```
+
+### Step 4: Verify Deployment
+
+Check that all services are running:
+
+```bash
+docker-compose ps
+```
+
+You should see 6 containers running:
+- `paper-reader-app`
+- `paper-reader-postgres`
+- `paper-reader-minio`
+- `paper-reader-redis`
+- `paper-reader-tts-service`
+- `paper-reader-tts-worker`
+
+### Step 5: Access the App
+
+Open your browser to:
+- **Paper Reader**: http://localhost:3001
+- **MinIO Console**: http://localhost:3004
+
+MinIO credentials are in your `.env` file (`MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`)
 
 ---
 
-## Option 2: Full Stack Deployment (App + Local Supabase)
+## 🎛️ Portainer Deployment
 
-### Prerequisites
-- Docker and Docker Compose installed
-- Portainer running
-- At least 4GB RAM available
-- 10GB+ disk space
+### Method 1: Stack Deployment (Recommended)
 
-### Step 1: Generate Secure Keys
-
-Generate secure passwords and JWT secrets:
-
-```bash
-# Generate a secure password
-openssl rand -base64 32
-
-# Generate JWT secret (at least 32 characters)
-openssl rand -base64 48
-```
-
-### Step 2: Configure Environment Variables
-
-Copy the template:
-
-```bash
-cp .env.docker .env
-```
-
-Edit `.env` and replace these values:
-
-```bash
-# IMPORTANT: Change these!
-POSTGRES_PASSWORD=your-generated-password-here
-JWT_SECRET=your-generated-jwt-secret-here-at-least-32-chars
-
-# Generate your own keys at https://supabase.com/docs/guides/hosting/overview#api-keys
-# Or keep the demo keys for local development (NOT FOR PRODUCTION)
-SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-
-# Update these to match your server
-API_EXTERNAL_URL=http://your-server-ip:8000
-SITE_URL=http://your-server-ip:3000
-```
-
-### Step 3: Deploy Full Stack with Portainer
-
-1. Open Portainer
+1. Open Portainer UI
 2. Go to **Stacks** → **Add stack**
-3. Name it: `paper-reader-full`
-4. Choose **Upload** and select `docker-compose.full-stack.yml`
-5. In **Environment variables**, paste your `.env` content
-6. Click **Deploy the stack**
+3. Name it: `paper-reader`
+4. Upload the `docker-compose.yml` file or paste its contents
+5. Go to **Environment variables** tab
+6. Add your environment variables (or upload `.env` file)
+7. Click **Deploy the stack**
 
-### Step 4: Initialize Database
+### Method 2: Repository Deployment
 
-After the stack is deployed:
+1. Go to **Stacks** → **Add stack**
+2. Select **Git Repository**
+3. Repository URL: `https://github.com/edwardbirdlab/paper-reader`
+4. Reference: `main`
+5. Compose path: `docker-compose.yml`
+6. Add environment variables
+7. Click **Deploy the stack**
 
-1. Wait for all containers to be healthy (~30 seconds)
-2. Run the database schema:
+### Monitoring in Portainer
 
-```bash
-docker exec paper-reader-db psql -U postgres -d postgres -f /docker-entrypoint-initdb.d/schema.sql
-```
-
-Or via Portainer:
-1. Go to **Containers** → **paper-reader-db**
-2. Click **Console** → **Connect**
-3. Run: `psql -U postgres -d postgres -f /docker-entrypoint-initdb.d/schema.sql`
-
-### Step 5: Create Storage Buckets
-
-1. Open Supabase Studio: `http://your-server-ip:3001`
-2. Go to **Storage**
-3. Create three buckets:
-   - `papers` (Public: No, File size limit: 50MB)
-   - `voice-notes` (Public: No, File size limit: 10MB)
-   - `tts-audio` (Public: No, File size limit: 100MB)
-4. Apply storage policies from `supabase/README.md`
-
-### Step 6: Access Your Apps
-
-- **Paper Reader App**: `http://your-server-ip:3000`
-- **Supabase Studio**: `http://your-server-ip:3001` (Database UI)
-- **Supabase API**: `http://your-server-ip:8000`
+After deployment, you can:
+- **View logs**: Click on stack → Select container → Logs
+- **Monitor resources**: Dashboard shows CPU/RAM usage
+- **Restart services**: Click on container → Restart
+- **Scale workers**: Increase `tts-worker` replicas for faster processing
 
 ---
 
-## 🔧 Configuration & Management
+## 🔧 Configuration
 
-### Port Mappings
+### Adjusting TTS Performance
 
-#### Simple Deployment
-- `3000` - Paper Reader App
+For better performance, tune these settings in `.env`:
 
-#### Full Stack Deployment
-- `3000` - Paper Reader App
-- `3001` - Supabase Studio (Database UI)
-- `5432` - PostgreSQL Database
-- `8000` - Supabase API Gateway (Kong)
-- `8443` - Supabase API Gateway (Kong HTTPS)
+```env
+# If you have a powerful CPU (16+ cores)
+WORKER_CONCURRENCY=4
+CPU_CORES=16
 
-### Persistent Data
-
-All data is stored in Docker volumes:
-
-- `postgres-data` - Database data
-- `storage-data` - Uploaded files (PDFs, voice notes)
-
-To backup your data:
-
-```bash
-# Backup database
-docker exec paper-reader-db pg_dump -U postgres postgres > backup.sql
-
-# Backup storage
-docker cp paper-reader-storage:/var/lib/storage ./storage-backup
+# If you have a modest CPU (4-8 cores)
+WORKER_CONCURRENCY=2
+CPU_CORES=8
 ```
 
-### Updating the App
-
-#### Via Portainer:
-1. Go to **Stacks** → **paper-reader**
-2. Click **Editor**
-3. Click **Update the stack**
-
-#### Via CLI:
+Then restart the services:
 ```bash
-cd /path/to/paper-reader
+docker-compose restart tts-worker tts-service
+```
+
+### Scaling TTS Workers
+
+To process multiple papers simultaneously:
+
+```bash
+docker-compose up -d --scale tts-worker=3
+```
+
+This creates 3 worker instances, each processing 2 chunks in parallel (default concurrency).
+
+---
+
+## 💾 Data Management
+
+### Database Backup
+
+```bash
+# Create backup
+docker exec paper-reader-postgres pg_dump -U paper_reader paper_reader > backup_$(date +%Y%m%d).sql
+
+# Restore backup
+cat backup_20240101.sql | docker exec -i paper-reader-postgres psql -U paper_reader paper_reader
+```
+
+### MinIO Backup
+
+MinIO data is stored in Docker volume `minio_data`. To backup:
+
+```bash
+# Export volume
+docker run --rm -v paper-reader_minio_data:/data -v $(pwd):/backup alpine tar czf /backup/minio_backup.tar.gz /data
+```
+
+### Complete Backup
+
+```bash
+# Stop services
 docker-compose down
-docker-compose pull
+
+# Backup volumes
+docker run --rm -v paper-reader_postgres_data:/data -v $(pwd):/backup alpine tar czf /backup/postgres_backup.tar.gz /data
+docker run --rm -v paper-reader_minio_data:/data -v $(pwd):/backup alpine tar czf /backup/minio_backup.tar.gz /data
+docker run --rm -v paper-reader_redis_data:/data -v $(pwd):/backup alpine tar czf /backup/redis_backup.tar.gz /data
+
+# Restart services
 docker-compose up -d
-```
-
-Or with full stack:
-```bash
-docker-compose -f docker-compose.full-stack.yml down
-docker-compose -f docker-compose.full-stack.yml pull
-docker-compose -f docker-compose.full-stack.yml up -d
-```
-
----
-
-## 🌐 Setting Up Reverse Proxy (Optional)
-
-If you want to access your app via a domain name (e.g., `papers.yourdomain.local`), you can set up a reverse proxy.
-
-### Option A: Nginx Proxy Manager (Recommended for Home Lab)
-
-1. Install Nginx Proxy Manager via Portainer
-2. Add a proxy host:
-   - Domain: `papers.yourdomain.local`
-   - Scheme: `http`
-   - Forward Hostname/IP: `paper-reader` (or `paper-reader-app` for full stack)
-   - Forward Port: `3000`
-   - Enable Websockets Support
-
-### Option B: Traefik Labels
-
-Add these labels to the `paper-reader` service in `docker-compose.yml`:
-
-```yaml
-labels:
-  - "traefik.enable=true"
-  - "traefik.http.routers.paper-reader.rule=Host(`papers.yourdomain.local`)"
-  - "traefik.http.services.paper-reader.loadbalancer.server.port=3000"
 ```
 
 ---
 
 ## 🐛 Troubleshooting
 
-### Container won't start
+### Services Won't Start
 
-Check logs in Portainer:
-1. Go to **Containers**
-2. Click on the failing container
-3. Click **Logs**
-
-Or via CLI:
+Check logs:
 ```bash
-docker logs paper-reader
-docker logs paper-reader-db
+docker-compose logs -f
 ```
 
-### Database connection issues
+Common issues:
+- **Port conflicts**: Ports 3001-3006 must be available
+- **Insufficient RAM**: Need at least 4GB available
+- **Permissions**: Ensure Docker has access to mount volumes
 
-1. Ensure PostgreSQL is healthy:
+### TTS Not Processing
+
+Check worker logs:
 ```bash
-docker exec paper-reader-db pg_isready -U postgres
+docker-compose logs -f tts-worker
 ```
 
-2. Check if schema was applied:
+Check TTS service:
 ```bash
-docker exec paper-reader-db psql -U postgres -d postgres -c "\dt"
+docker-compose logs -f tts-service
+curl http://localhost:3006/health
 ```
 
-### Storage bucket errors
-
-1. Verify buckets exist in Supabase Studio
-2. Check storage policies are applied
-3. Verify file permissions in storage container:
+Check queue:
 ```bash
-docker exec paper-reader-storage ls -la /var/lib/storage
+docker exec -it paper-reader-redis redis-cli
+> KEYS bull:tts-jobs:*
+> LLEN bull:tts-jobs:wait
 ```
 
-### App can't connect to Supabase
+### Audio Not Playing
 
-1. Check environment variables:
+1. Check MinIO is accessible:
+   - Open http://localhost:3004
+   - Login with credentials from `.env`
+   - Verify `audio` bucket exists and has files
+
+2. Check browser console for errors
+
+3. Verify MinIO public access:
 ```bash
-docker exec paper-reader env | grep SUPABASE
+docker exec paper-reader-minio mc anonymous list myminio/audio
 ```
 
-2. Verify Supabase API is accessible:
+### Database Connection Errors
+
+Check PostgreSQL is running:
 ```bash
-curl http://localhost:8000/rest/v1/
+docker-compose ps postgres
+```
+
+Test connection:
+```bash
+docker exec paper-reader-app node -e "const {Pool}=require('pg'); new Pool({connectionString:process.env.DATABASE_URL}).query('SELECT NOW()').then(r=>console.log(r.rows))"
 ```
 
 ---
 
-## 📊 Monitoring & Maintenance
+## 🔄 Updates
 
-### View Resource Usage
+### Updating the App
 
-In Portainer:
-1. Go to **Containers**
-2. Click on a container
-3. View **Stats** tab
+```bash
+# Pull latest code
+git pull
 
-Via CLI:
+# Rebuild and restart
+docker-compose down
+docker-compose up -d --build
+```
+
+### Updating a Specific Service
+
+```bash
+docker-compose up -d --build app
+docker-compose up -d --build tts-worker
+```
+
+---
+
+## 📊 Monitoring
+
+### View All Logs
+
+```bash
+docker-compose logs -f
+```
+
+### View Specific Service
+
+```bash
+docker-compose logs -f tts-worker
+```
+
+### Check Resource Usage
+
 ```bash
 docker stats
 ```
 
-### Backup Strategy
-
-Create a backup script:
+### Check TTS Processing Status
 
 ```bash
-#!/bin/bash
-BACKUP_DIR="/path/to/backups"
-DATE=$(date +%Y%m%d_%H%M%S)
+# Check queue length
+docker exec paper-reader-redis redis-cli LLEN bull:tts-jobs:wait
 
-# Backup database
-docker exec paper-reader-db pg_dump -U postgres postgres > "$BACKUP_DIR/db_$DATE.sql"
+# Check completed jobs
+docker exec paper-reader-redis redis-cli LLEN bull:tts-jobs:completed
 
-# Backup storage
-docker run --rm -v paper-reader_storage-data:/data -v "$BACKUP_DIR":/backup alpine tar czf /backup/storage_$DATE.tar.gz -C /data .
-
-echo "Backup completed: $DATE"
+# Check failed jobs
+docker exec paper-reader-redis redis-cli LLEN bull:tts-jobs:failed
 ```
 
-Run this script daily with cron.
+---
+
+## 🌐 Remote Access
+
+### Using Reverse Proxy (Nginx/Traefik)
+
+Add labels to `docker-compose.yml` for your reverse proxy. Example for Traefik:
+
+```yaml
+app:
+  labels:
+    - "traefik.enable=true"
+    - "traefik.http.routers.paper-reader.rule=Host(`papers.yourdomain.com`)"
+    - "traefik.http.services.paper-reader.loadbalancer.server.port=3000"
+```
+
+### Direct Port Mapping
+
+Change the port mapping in `docker-compose.yml`:
+
+```yaml
+app:
+  ports:
+    - "3001:3000"  # Change 3001 to any available port
+```
 
 ---
 
-## 🔒 Security Considerations
+## 🔐 Security Considerations
 
-### For Local Network Use:
-- Default credentials are fine for local-only access
-- Use firewall rules to prevent external access to ports
-
-### For Internet-Facing Deployment:
-- Generate strong, unique passwords and JWT secrets
-- Use HTTPS (via reverse proxy with Let's Encrypt)
-- Enable Supabase Auth email verification
-- Regularly update Docker images
-- Implement rate limiting on the reverse proxy
+1. **Change default passwords** in `.env`
+2. **Use strong passwords** for PostgreSQL and MinIO
+3. **Restrict access** to ports 3002-3006 (only expose 3001 publicly if needed)
+4. **Enable HTTPS** when exposing to internet
+5. **Regular backups** of database and MinIO volumes
+6. **Update regularly** to get security patches
 
 ---
 
-## 🚀 Performance Optimization
+## 📚 Additional Resources
 
-### For Low-End Hardware:
-- Use simple deployment (cloud Supabase)
-- Reduce allocated resources in docker-compose
-
-### For High Performance:
-- Use full stack deployment
-- Increase database shared_buffers in PostgreSQL
-- Add Redis for caching (future enhancement)
+- **Full command reference**: See [DOCKER_COMMANDS.md](DOCKER_COMMANDS.md)
+- **Developer notes**: See [DEVELOPER_NOTES.md](DEVELOPER_NOTES.md)
+- **Portainer setup**: See [PORTAINER_SETUP.md](PORTAINER_SETUP.md)
+- **Architecture details**: See [CLAUDE.md](CLAUDE.md)
 
 ---
 
-## 📝 Next Steps
+## 💡 Tips
 
-After deployment:
+- **First upload**: TTS processing may take 15-30 minutes for a typical paper
+- **Monitor progress**: Check worker logs to see processing status
+- **Optimize for your hardware**: Adjust `CPU_CORES` and `WORKER_CONCURRENCY`
+- **Storage planning**: Typical paper = 5MB PDF + 150MB audio
+- **MinIO console**: Useful for verifying uploads and checking storage usage
 
-1. Create your first user account
-2. Upload a test PDF
-3. Test TTS functionality
-4. Record a voice note
-5. Set up automatic backups
+---
 
-Enjoy your self-hosted scientific paper reader! 📚
+**Last Updated**: 2025-11-13
+**Version**: 2.0.0 - Local Stack with Kokoro TTS
+**Architecture**: Fully self-hosted, CPU-optimized, production-ready
