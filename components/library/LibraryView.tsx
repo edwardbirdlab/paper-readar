@@ -34,9 +34,7 @@ export default function LibraryView({ initialPapers }: LibraryViewProps) {
   const filteredPapers = papers.filter((paper) => {
     const matchesSearch =
       paper.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      paper.authors?.some((author) =>
-        author.toLowerCase().includes(searchQuery.toLowerCase())
-      );
+      paper.authors?.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesStatus =
       filterStatus === 'all' || paper.reading_status === filterStatus;
