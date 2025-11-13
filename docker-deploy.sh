@@ -126,7 +126,18 @@ $COMPOSE_CMD down
 
 # Remove postgres volume to ensure fresh database initialization
 echo "🗑️  Removing old database volume to reinitialize schema..."
-docker volume rm paper-readar_postgres_data 2>/dev/null || true
+# Try both possible volume names (in case project name varies)
+VOLUME_REMOVED=false
+for vol in paper-readar_postgres_data paper-reader_postgres_data; do
+    if docker volume inspect $vol &>/dev/null; then
+        echo "   Found volume: $vol"
+        docker volume rm $vol 2>/dev/null && VOLUME_REMOVED=true && echo "   ✓ Removed $vol"
+    fi
+done
+
+if [ "$VOLUME_REMOVED" = false ]; then
+    echo "   ℹ️  No existing postgres volume found (this is OK for first run)"
+fi
 
 # Rebuild containers from scratch without cache
 # --build: Build images before starting containers
@@ -140,7 +151,41 @@ $COMPOSE_CMD up -d --force-recreate
 
 echo ""
 echo "⏳ Waiting for services to be healthy..."
-sleep 15
+echo "   Waiting for PostgreSQL to start..."
+sleep 10
+
+# Wait for postgres to be ready
+MAX_WAIT=30
+WAIT_COUNT=0
+until docker compose exec -T postgres pg_isready -U paper_reader &>/dev/null || [ $WAIT_COUNT -eq $MAX_WAIT ]; do
+    echo "   Still waiting for PostgreSQL... ($WAIT_COUNT/$MAX_WAIT)"
+    sleep 2
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+done
+
+if [ $WAIT_COUNT -eq $MAX_WAIT ]; then
+    echo "   ⚠️  PostgreSQL took too long to start"
+else
+    echo "   ✓ PostgreSQL is ready"
+
+    # Verify schema was initialized by checking if papers table exists
+    echo "   Verifying database schema..."
+    if docker compose exec -T postgres psql -U paper_reader -d paper_reader -c '\dt papers' 2>/dev/null | grep -q 'papers'; then
+        echo "   ✓ Database schema initialized successfully"
+    else
+        echo "   ⚠️  Schema not found, initializing manually..."
+        docker compose exec -T postgres psql -U paper_reader -d paper_reader -f /docker-entrypoint-initdb.d/01-schema.sql
+        if [ $? -eq 0 ]; then
+            echo "   ✓ Manual schema initialization successful"
+        else
+            echo "   ❌ Failed to initialize schema"
+        fi
+    fi
+fi
+
+echo ""
+echo "   Waiting for other services..."
+sleep 5
 
 echo ""
 echo "✅ Deployment complete!"
