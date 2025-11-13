@@ -110,7 +110,7 @@ else
 fi
 
 echo "🚀 Building and starting all services..."
-echo "This may take a few minutes on first run..."
+echo "This may take a few minutes (rebuilding from scratch)..."
 echo ""
 
 # Use docker-compose or docker compose depending on what's available
@@ -120,7 +120,15 @@ else
     COMPOSE_CMD="docker compose"
 fi
 
-$COMPOSE_CMD up -d --build
+# Rebuild containers from scratch without cache
+# --build: Build images before starting containers
+# --force-recreate: Recreate containers even if config hasn't changed
+# --no-cache: Don't use cache when building images (ensures clean build)
+echo "🔨 Rebuilding all images from scratch..."
+$COMPOSE_CMD build --no-cache
+
+echo "🔄 Recreating all containers..."
+$COMPOSE_CMD up -d --force-recreate
 
 echo ""
 echo "⏳ Waiting for services to be healthy..."
