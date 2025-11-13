@@ -9,6 +9,7 @@ import asyncio
 from pathlib import Path
 from typing import Optional
 import logging
+import urllib.request
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
@@ -33,8 +34,45 @@ ONNX_NUM_THREADS = int(os.getenv("ONNX_NUM_THREADS", "8"))
 TEMP_AUDIO_DIR = Path("/tmp/tts_audio")
 TEMP_AUDIO_DIR.mkdir(exist_ok=True)
 
+# Model file URLs (from Hugging Face)
+MODEL_FILE_URL = "https://huggingface.co/hexgrad/Kokoro-82M/resolve/main/kokoro-v1.0.onnx"
+VOICES_FILE_URL = "https://huggingface.co/hexgrad/Kokoro-82M/resolve/main/voices-v1.0.bin"
+
 # Global model instance (lazy loaded)
 kokoro_model = None
+
+
+def download_model_files():
+    """Download Kokoro model files if they don't exist"""
+    model_dir = Path(MODEL_PATH)
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    model_file = model_dir / "kokoro-v1.0.onnx"
+    voices_file = model_dir / "voices-v1.0.bin"
+
+    if not model_file.exists():
+        logger.info(f"Downloading model file to {model_file}...")
+        try:
+            urllib.request.urlretrieve(MODEL_FILE_URL, model_file)
+            logger.info(f"Model file downloaded successfully ({model_file.stat().st_size / 1024 / 1024:.1f} MB)")
+        except Exception as e:
+            logger.error(f"Failed to download model file: {e}")
+            raise
+    else:
+        logger.info(f"Model file already exists at {model_file}")
+
+    if not voices_file.exists():
+        logger.info(f"Downloading voices file to {voices_file}...")
+        try:
+            urllib.request.urlretrieve(VOICES_FILE_URL, voices_file)
+            logger.info(f"Voices file downloaded successfully ({voices_file.stat().st_size / 1024 / 1024:.1f} MB)")
+        except Exception as e:
+            logger.error(f"Failed to download voices file: {e}")
+            raise
+    else:
+        logger.info(f"Voices file already exists at {voices_file}")
+
+    return str(model_file), str(voices_file)
 
 
 class TTSRequest(BaseModel):
@@ -73,10 +111,12 @@ def load_kokoro_model():
         try:
             from kokoro_onnx import Kokoro
 
-            # Initialize with CPU-optimized settings
-            kokoro_model = Kokoro(
-                model_path=MODEL_PATH
-            )
+            # Download model files if needed
+            model_file, voices_file = download_model_files()
+
+            # Initialize Kokoro with both required files
+            logger.info(f"Initializing Kokoro with model: {model_file}, voices: {voices_file}")
+            kokoro_model = Kokoro(model_file, voices_file)
 
             logger.info("Kokoro model loaded successfully")
             return kokoro_model
@@ -99,7 +139,7 @@ class FallbackTTS:
         self.sample_rate = 22050
         logger.warning("Using fallback TTS - Kokoro not available")
 
-    def generate(self, text: str, voice: str = "af_sarah", speed: float = 1.0):
+    def create(self, text: str, voice: str = "af_sarah", speed: float = 1.0, lang: str = "en-us"):
         """Generate dummy audio (silence) for testing"""
         duration = len(text) * 0.05  # Rough estimate: 50ms per character
         samples = int(self.sample_rate * duration / speed)
@@ -146,10 +186,11 @@ async def generate_tts(request: TTSRequest):
         logger.info(f"Generating TTS for {len(request.text)} characters")
 
         # Generate audio using Kokoro
-        audio, sample_rate = kokoro_model.generate(
+        audio, sample_rate = kokoro_model.create(
             text=request.text,
             voice=request.voice,
-            speed=request.speed
+            speed=request.speed,
+            lang="en-us"
         )
 
         # Calculate duration
