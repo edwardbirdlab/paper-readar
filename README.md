@@ -94,11 +94,16 @@ A Progressive Web App for reading, annotating, and listening to scientific paper
 
 Quick start with Docker:
 ```bash
-# Deploy the full self-hosted stack
-docker-compose up -d
-
-# Or use the deployment script
+# Option 1: Interactive deployment (Recommended)
+# - Prompts for development/production mode
+# - Generates secure credentials automatically
+# - Creates .env file for you
 ./docker-deploy.sh
+
+# Option 2: Manual deployment
+# - Requires you to create .env file first (copy from .env.example)
+# - No interactive prompts
+docker-compose up -d
 ```
 
 **What you get with Docker:**
@@ -155,13 +160,26 @@ This automatically sets up:
 
 ### 4. Configure Environment Variables
 
+**For Docker deployment:**
+```bash
+# Create .env file (or use ./docker-deploy.sh to create it interactively)
+cp .env.example .env
+
+# Edit .env and set NODE_ENV to 'development' for detailed error logging
+# or 'production' for optimized performance
+```
+
+**For local development:**
 ```bash
 cp .env.example .env.local
 ```
 
-Edit `.env.local` and configure your services:
+Edit your env file and configure:
 
 ```env
+# Application Configuration
+NODE_ENV=development  # Use 'development' for detailed logging
+
 # Database Configuration
 POSTGRES_PASSWORD=your_secure_password
 
