@@ -75,8 +75,7 @@ def load_kokoro_model():
 
             # Initialize with CPU-optimized settings
             kokoro_model = Kokoro(
-                model_path=MODEL_PATH,
-                num_threads=ONNX_NUM_THREADS
+                model_path=MODEL_PATH
             )
 
             logger.info("Kokoro model loaded successfully")

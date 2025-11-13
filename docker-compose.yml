@@ -143,6 +143,7 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - DATABASE_URL=postgresql://paper_reader:${POSTGRES_PASSWORD:-changeme}@postgres:5432/paper_reader
       - MINIO_ENDPOINT=minio:9000
+      - MINIO_PUBLIC_ENDPOINT=${MINIO_PUBLIC_ENDPOINT:-localhost:3003}
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       - MINIO_USE_SSL=false

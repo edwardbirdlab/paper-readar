@@ -86,6 +86,10 @@ NODE_ENV=$NODE_ENV
 # TTS Worker Configuration
 WORKER_CONCURRENCY=2
 CPU_CORES=8
+
+# MinIO Public Endpoint (for browser access to PDFs and audio)
+# Note: This is already set in docker-compose.yml but can be overridden here
+# MINIO_PUBLIC_ENDPOINT=localhost:3003
 EOF
 
     echo "✅ .env file created with secure credentials"

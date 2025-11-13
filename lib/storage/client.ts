@@ -215,7 +215,8 @@ export async function getPresignedUrl(
  */
 export function getPublicUrl(bucketName: string, fileName: string): string {
   const protocol = process.env.MINIO_USE_SSL === 'true' ? 'https' : 'http';
-  const endpoint = process.env.MINIO_ENDPOINT || 'localhost:9000';
+  // Use public endpoint for browser-accessible URLs, fallback to internal endpoint
+  const endpoint = process.env.MINIO_PUBLIC_ENDPOINT || process.env.MINIO_ENDPOINT || 'localhost:9000';
   return `${protocol}://${endpoint}/${bucketName}/${fileName}`;
 }
 
@@ -276,7 +277,7 @@ export const papers = {
   },
 
   async getUrl(fileName: string): Promise<string> {
-    return getPresignedUrl(BUCKETS.PAPERS, fileName);
+    return getPublicUrl(BUCKETS.PAPERS, fileName);
   },
 
   async delete(fileName: string): Promise<void> {
