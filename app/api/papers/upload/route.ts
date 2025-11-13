@@ -45,10 +45,15 @@ export async function POST(request: NextRequest) {
     try {
       // Call the default or module itself based on what's available
       pdfData = await (pdfParse.default || pdfParse)(buffer);
-    } catch (error) {
+    } catch (error: any) {
       console.error('PDF parsing error:', error);
+      console.error('PDF parsing error stack:', error.stack);
+      const isDev = process.env.NODE_ENV === 'development';
       return NextResponse.json(
-        { error: 'Failed to parse PDF file' },
+        {
+          error: 'Failed to parse PDF file',
+          ...(isDev && { details: error.message, stack: error.stack })
+        },
         { status: 400 }
       );
     }
@@ -165,8 +170,15 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error('Upload error:', error);
+    console.error('Error stack:', error.stack);
+
+    // In development, return detailed error info
+    const isDev = process.env.NODE_ENV === 'development';
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      {
+        error: error.message || 'Internal server error',
+        ...(isDev && { stack: error.stack, details: error })
+      },
       { status: 500 }
     );
   }
