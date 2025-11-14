@@ -331,6 +331,7 @@ export const voiceNotes = {
   },
 
   async getUrl(fileName: string): Promise<string> {
+    // Voice notes need presigned URLs for security, so this stays async
     return getPresignedUrl(BUCKETS.VOICE_NOTES, fileName);
   },
 
