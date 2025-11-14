@@ -2,6 +2,36 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🆕 Recent Changes: TTS Service v2 Redesign
+
+**IMPORTANT:** The TTS service has been completely redesigned from scratch to fix reliability issues.
+
+### What Changed
+- **Location:** `services/tts-service-v2/` (replaces `services/tts-service/`)
+- **API Endpoint:** `/synthesize` (replaces `/generate`)
+- **Response:** Audio returned as base64 in response (no file download needed)
+- **Status:** ✅ **Tested and working** (31 unit tests, 18 integration tests, manual verification)
+
+### Key Improvements
+1. **Actually works!** (v1 always returned 500 errors)
+2. Text preprocessing removes citations, URLs, LaTeX for better audio quality
+3. Simplified API - audio returned directly, no temp file management
+4. Comprehensive error handling with structured responses
+5. 54 voices available (categorized by accent/gender)
+
+### Migration
+- See `TTS_V2_MIGRATION_GUIDE.md` for detailed migration steps
+- Worker already updated in `services/tts-worker/src/index.ts`
+- `docker-compose.yml` already points to v2
+- Just rebuild: `docker-compose up -d --build tts-service tts-worker`
+
+### Documentation
+- **API Docs:** `services/tts-service-v2/README.md`
+- **Migration Guide:** `TTS_V2_MIGRATION_GUIDE.md`
+- **Tests:** `services/tts-service-v2/test_*.py`
+
+---
+
 ## Project Overview
 
 Scientific Paper Reader v2.0 - A Progressive Web App for reading, annotating, and listening to scientific papers using AI-powered TTS. Fully self-hosted local stack optimized for home lab deployment with Docker, using Kokoro TTS (CPU-optimized, #1 ranked quality).

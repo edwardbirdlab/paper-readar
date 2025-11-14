@@ -81,16 +81,20 @@ services:
       timeout: 5s
       retries: 5
 
-  # Kokoro TTS Service
+  # Kokoro TTS Service v2 - Redesigned with improved error handling
   tts-service:
     build:
-      context: ./services/tts-service
+      context: ./services/tts-service-v2
       dockerfile: Dockerfile
     container_name: paper-reader-tts-service
     restart: unless-stopped
     environment:
       - ONNX_NUM_THREADS=${CPU_CORES:-8}
-      - MODEL_PATH=/app/models
+      - MODEL_PATH=/app/models/kokoro-v1.0.onnx
+      - VOICES_PATH=/app/models/voices-v1.0.bin
+      - DEFAULT_VOICE=af_sarah
+      - DEFAULT_SPEED=1.0
+      - MAX_TEXT_LENGTH=5000
     volumes:
       - tts_models:/app/models
     networks:
@@ -101,6 +105,7 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
+      start_period: 60s
       retries: 3
 
   # TTS Worker - Background job processor

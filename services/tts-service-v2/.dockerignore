@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Testing
+.pytest_cache/
+*.pyc
+.coverage
+htmlcov/
+.tox/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Model files (download at runtime or mount as volume)
+*.onnx
+*.bin
+
+# Logs
+*.log
+
+# Temporary files
+/tmp/
+*.tmp
+
+# Tests and docs (not needed in image)
+test_*.py
+conftest.py
+*.md

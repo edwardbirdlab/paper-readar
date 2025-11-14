@@ -83,15 +83,16 @@ async function processTTSJob(job: Job<TTSJobData>) {
       ['processing', chunkId]
     );
 
-    // Call TTS service with timeout
-    logger.info(`Calling TTS service for ${text.length} characters`);
+    // Call TTS service v2 with timeout
+    logger.info(`Calling TTS service v2 for ${text.length} characters`);
     const ttsResponse = await axios.post(
-      `${config.tts.serviceUrl}/generate`,
+      `${config.tts.serviceUrl}/synthesize`,
       {
         text,
         voice,
         speed: 1.0,
-        format: 'wav'
+        preprocess: true,  // Enable text preprocessing
+        remove_citations: true  // Remove academic citations
       },
       {
         timeout: 120000, // 2 minute timeout
@@ -99,30 +100,37 @@ async function processTTSJob(job: Job<TTSJobData>) {
       }
     );
 
-    // Validate response
-    if (!ttsResponse.data || !ttsResponse.data.audio_path) {
-      throw new Error('Invalid TTS service response: missing audio_path');
+    // Validate response (v2 API returns audio as base64)
+    if (!ttsResponse.data || !ttsResponse.data.success) {
+      throw new Error('TTS service returned failure response');
     }
 
-    const { audio_path, duration, sample_rate } = ttsResponse.data;
-    logger.info(`TTS generated: ${duration}s audio at ${sample_rate}Hz`);
+    if (!ttsResponse.data.audio_base64) {
+      throw new Error('Invalid TTS service response: missing audio_base64');
+    }
 
-    // Download audio file from TTS service
-    const audioUrl = `${config.tts.serviceUrl}${audio_path}`;
-    logger.info(`Downloading audio from ${audioUrl}`);
+    const {
+      audio_base64,
+      duration_seconds,
+      sample_rate,
+      rtf,
+      metadata
+    } = ttsResponse.data;
 
-    const audioResponse = await axios.get(audioUrl, {
-      responseType: 'arraybuffer',
-      timeout: 30000 // 30 second timeout
-    });
+    logger.info(
+      `TTS generated: ${duration_seconds.toFixed(2)}s audio at ${sample_rate}Hz ` +
+      `(RTF: ${rtf.toFixed(3)}, size: ${metadata.audio_size_bytes} bytes)`
+    );
 
-    if (!audioResponse.data || audioResponse.data.byteLength === 0) {
-      throw new Error('Downloaded audio file is empty');
+    // Decode base64 audio to buffer
+    const audioBuffer = Buffer.from(audio_base64, 'base64');
+
+    if (audioBuffer.length === 0) {
+      throw new Error('Decoded audio buffer is empty');
     }
 
     // Upload to MinIO
     const audioFileName = `${paperId}/${chunkIndex}.wav`;
-    const audioBuffer = Buffer.from(audioResponse.data);
 
     logger.info(`Uploading audio to MinIO: ${audioFileName} (${audioBuffer.length} bytes)`);
 
@@ -142,12 +150,7 @@ async function processTTSJob(job: Job<TTSJobData>) {
       throw new Error(`Failed to upload audio to storage: ${uploadError.message}`);
     }
 
-    // Clean up temp file on TTS service
-    try {
-      await axios.delete(audioUrl);
-    } catch (err) {
-      logger.warn(`Failed to delete temp file: ${err}`);
-    }
+    // No temp file cleanup needed - v2 API returns audio directly
 
     // Update chunk with audio file path and duration
     await pool.query(
@@ -157,7 +160,7 @@ async function processTTSJob(job: Job<TTSJobData>) {
            tts_status = $3,
            updated_at = NOW()
        WHERE id = $4`,
-      [audioFileName, duration, 'completed', chunkId]
+      [audioFileName, duration_seconds, 'completed', chunkId]
     );
 
     // Check if all chunks for this paper are completed
@@ -189,7 +192,7 @@ async function processTTSJob(job: Job<TTSJobData>) {
 
     logger.info(`Successfully processed chunk ${chunkIndex} for paper ${paperId}`);
 
-    return { success: true, audioPath: audioFileName, duration };
+    return { success: true, audioPath: audioFileName, duration: duration_seconds };
 
   } catch (error: any) {
     // Categorize error for better debugging
