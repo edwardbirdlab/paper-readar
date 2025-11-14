@@ -173,6 +173,7 @@ class TestTTSEngine:
                 model_path=model_paths['model'],
                 voices_path=model_paths['voices'],
                 auto_load=True,
+                auto_download=False,  # Don't download in tests
             )
         except FileNotFoundError:
             pytest.skip("Model files not available")
@@ -183,6 +184,7 @@ class TestTTSEngine:
             model_path=model_paths['model'],
             voices_path=model_paths['voices'],
             auto_load=False,
+            auto_download=False,  # Don't download in tests
         )
         assert not engine.is_loaded
         assert engine.default_voice == "af_sarah"
@@ -287,6 +289,7 @@ class TestTTSEngine:
             model_path=model_paths['model'],
             voices_path=model_paths['voices'],
             auto_load=False,
+            auto_download=False,  # Don't download in tests
         )
 
         with pytest.raises(ModelNotLoadedError):

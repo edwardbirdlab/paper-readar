@@ -5,6 +5,7 @@ Handles text preprocessing, audio generation, and voice management
 import re
 import time
 import logging
+import urllib.request
 from typing import Tuple, Optional, Dict, Any
 from pathlib import Path
 
@@ -12,6 +13,10 @@ import numpy as np
 from kokoro_onnx import Kokoro
 
 logger = logging.getLogger(__name__)
+
+# Model download URLs
+MODEL_FILE_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
+VOICES_FILE_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
 
 
 class TTSError(Exception):
@@ -196,6 +201,7 @@ class TTSEngine:
         model_path: str,
         voices_path: str,
         auto_load: bool = True,
+        auto_download: bool = True,
         default_voice: str = "af_sarah",
         default_speed: float = 1.0,
     ):
@@ -206,11 +212,13 @@ class TTSEngine:
             model_path: Path to Kokoro ONNX model file
             voices_path: Path to voices.bin file
             auto_load: Whether to load model immediately
+            auto_download: Whether to auto-download missing model files
             default_voice: Default voice to use
             default_speed: Default speech speed
         """
         self.model_path = Path(model_path)
         self.voices_path = Path(voices_path)
+        self.auto_download = auto_download
         self.default_voice = default_voice
         self.default_speed = default_speed
 
@@ -218,7 +226,11 @@ class TTSEngine:
         self._available_voices: Optional[list] = None
         self._preprocessor = TextPreprocessor()
 
-        # Validate paths
+        # Download model files if missing and auto_download enabled
+        if auto_download:
+            self._ensure_model_files()
+
+        # Validate paths after potential download
         if not self.model_path.exists():
             raise FileNotFoundError(f"Model file not found: {model_path}")
         if not self.voices_path.exists():
@@ -226,6 +238,48 @@ class TTSEngine:
 
         if auto_load:
             self.load_model()
+
+    def _ensure_model_files(self) -> None:
+        """
+        Download model files if they don't exist
+
+        Raises:
+            TTSError: If download fails
+        """
+        model_dir = self.model_path.parent
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        # Download model file if missing
+        if not self.model_path.exists():
+            logger.info(f"Model file not found at {self.model_path}")
+            logger.info(f"Downloading model file from {MODEL_FILE_URL} (~310 MB)...")
+            try:
+                start_time = time.time()
+                urllib.request.urlretrieve(MODEL_FILE_URL, self.model_path)
+                elapsed = time.time() - start_time
+                size_mb = self.model_path.stat().st_size / 1024 / 1024
+                logger.info(f"✓ Model file downloaded: {size_mb:.1f} MB in {elapsed:.1f}s")
+            except Exception as e:
+                logger.error(f"Failed to download model file: {e}")
+                raise TTSError(f"Failed to download model file: {e}") from e
+        else:
+            logger.info(f"Model file found at {self.model_path}")
+
+        # Download voices file if missing
+        if not self.voices_path.exists():
+            logger.info(f"Voices file not found at {self.voices_path}")
+            logger.info(f"Downloading voices file from {VOICES_FILE_URL} (~27 MB)...")
+            try:
+                start_time = time.time()
+                urllib.request.urlretrieve(VOICES_FILE_URL, self.voices_path)
+                elapsed = time.time() - start_time
+                size_mb = self.voices_path.stat().st_size / 1024 / 1024
+                logger.info(f"✓ Voices file downloaded: {size_mb:.1f} MB in {elapsed:.1f}s")
+            except Exception as e:
+                logger.error(f"Failed to download voices file: {e}")
+                raise TTSError(f"Failed to download voices file: {e}") from e
+        else:
+            logger.info(f"Voices file found at {self.voices_path}")
 
     def load_model(self) -> None:
         """
