@@ -83,39 +83,64 @@ async function processTTSJob(job: Job<TTSJobData>) {
       ['processing', chunkId]
     );
 
-    // Call TTS service
+    // Call TTS service with timeout
     logger.info(`Calling TTS service for ${text.length} characters`);
-    const ttsResponse = await axios.post(`${config.tts.serviceUrl}/generate`, {
-      text,
-      voice,
-      speed: 1.0,
-      format: 'wav'
-    });
+    const ttsResponse = await axios.post(
+      `${config.tts.serviceUrl}/generate`,
+      {
+        text,
+        voice,
+        speed: 1.0,
+        format: 'wav'
+      },
+      {
+        timeout: 120000, // 2 minute timeout
+        validateStatus: (status) => status === 200
+      }
+    );
 
-    const { audio_path, duration } = ttsResponse.data;
+    // Validate response
+    if (!ttsResponse.data || !ttsResponse.data.audio_path) {
+      throw new Error('Invalid TTS service response: missing audio_path');
+    }
+
+    const { audio_path, duration, sample_rate } = ttsResponse.data;
+    logger.info(`TTS generated: ${duration}s audio at ${sample_rate}Hz`);
 
     // Download audio file from TTS service
     const audioUrl = `${config.tts.serviceUrl}${audio_path}`;
     logger.info(`Downloading audio from ${audioUrl}`);
 
     const audioResponse = await axios.get(audioUrl, {
-      responseType: 'arraybuffer'
+      responseType: 'arraybuffer',
+      timeout: 30000 // 30 second timeout
     });
+
+    if (!audioResponse.data || audioResponse.data.byteLength === 0) {
+      throw new Error('Downloaded audio file is empty');
+    }
 
     // Upload to MinIO
     const audioFileName = `${paperId}/${chunkIndex}.wav`;
     const audioBuffer = Buffer.from(audioResponse.data);
 
-    logger.info(`Uploading audio to MinIO: ${audioFileName}`);
-    await minioClient.putObject(
-      'audio',
-      audioFileName,
-      audioBuffer,
-      audioBuffer.length,
-      {
-        'Content-Type': 'audio/wav'
-      }
-    );
+    logger.info(`Uploading audio to MinIO: ${audioFileName} (${audioBuffer.length} bytes)`);
+
+    try {
+      await minioClient.putObject(
+        'audio',
+        audioFileName,
+        audioBuffer,
+        audioBuffer.length,
+        {
+          'Content-Type': 'audio/wav'
+        }
+      );
+      logger.info(`Successfully uploaded audio to MinIO: ${audioFileName}`);
+    } catch (uploadError: any) {
+      logger.error(`MinIO upload failed: ${uploadError.message}`);
+      throw new Error(`Failed to upload audio to storage: ${uploadError.message}`);
+    }
 
     // Clean up temp file on TTS service
     try {
@@ -167,7 +192,31 @@ async function processTTSJob(job: Job<TTSJobData>) {
     return { success: true, audioPath: audioFileName, duration };
 
   } catch (error: any) {
-    logger.error(`Error processing TTS job: ${error.message}`, { error });
+    // Categorize error for better debugging
+    let errorCategory = 'Unknown';
+    let errorMessage = error.message || 'Unknown error';
+
+    if (error.code === 'ECONNREFUSED') {
+      errorCategory = 'TTS Service Unavailable';
+      errorMessage = `Cannot connect to TTS service at ${config.tts.serviceUrl}`;
+    } else if (error.code === 'ETIMEDOUT' || error.message?.includes('timeout')) {
+      errorCategory = 'Timeout';
+      errorMessage = 'TTS generation or download timed out';
+    } else if (error.response) {
+      errorCategory = 'TTS Service Error';
+      errorMessage = `TTS service returned ${error.response.status}: ${error.response.data?.detail || error.message}`;
+    } else if (error.message?.includes('MinIO') || error.message?.includes('storage')) {
+      errorCategory = 'Storage Error';
+    }
+
+    const fullError = `[${errorCategory}] ${errorMessage}`;
+    logger.error(`Error processing TTS job: ${fullError}`, {
+      error,
+      paperId,
+      chunkId,
+      chunkIndex,
+      category: errorCategory
+    });
 
     // Update chunk with error
     await pool.query(
@@ -176,7 +225,7 @@ async function processTTSJob(job: Job<TTSJobData>) {
            tts_error = $2,
            updated_at = NOW()
        WHERE id = $3`,
-      ['failed', error.message, chunkId]
+      ['failed', fullError, chunkId]
     );
 
     // Update paper status to failed
@@ -186,7 +235,7 @@ async function processTTSJob(job: Job<TTSJobData>) {
            tts_error = $2,
            updated_at = NOW()
        WHERE id = $3`,
-      ['failed', error.message, paperId]
+      ['failed', fullError, paperId]
     );
 
     throw error;
@@ -222,6 +271,17 @@ async function main() {
   } catch (error) {
     logger.error('Failed to connect to MinIO:', error);
     process.exit(1);
+  }
+
+  // Test TTS service connection
+  try {
+    const healthCheck = await axios.get(`${config.tts.serviceUrl}/health`, {
+      timeout: 10000
+    });
+    logger.info(`TTS service connected successfully. Status: ${healthCheck.data.status}`);
+  } catch (error: any) {
+    logger.error(`Failed to connect to TTS service at ${config.tts.serviceUrl}:`, error.message);
+    logger.warn('Worker will continue but TTS jobs may fail until service is available');
   }
 
   // Create BullMQ worker
