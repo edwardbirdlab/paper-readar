@@ -37,7 +37,7 @@ export async function GET(
       audioUrl: chunk.audio_file_path
         ? storage.audio.getUrl(chunk.audio_file_path)
         : null,
-      audioDuration: chunk.audio_duration ? parseFloat(chunk.audio_duration) : null,
+      audioDuration: chunk.audio_duration || null,
       ttsStatus: chunk.tts_status,
       ttsError: chunk.tts_error,
       createdAt: chunk.created_at,

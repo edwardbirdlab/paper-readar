@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS paper_chunks (
   word_count INTEGER,
   char_count INTEGER,
   audio_file_path TEXT,
-  audio_duration INTEGER, -- Duration in seconds
+  audio_duration NUMERIC(10, 2), -- Duration in seconds with decimal precision
   tts_status TEXT DEFAULT 'pending' CHECK (tts_status IN ('pending', 'processing', 'completed', 'failed')),
   tts_error TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
