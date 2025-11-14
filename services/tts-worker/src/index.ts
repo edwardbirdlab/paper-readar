@@ -34,7 +34,7 @@ const config = {
     port: parseInt(process.env.REDIS_URL?.split(':')[2] || '6379')
   },
   database: {
-    connectionString: process.env.DATABASE_URL || 'postgresql://paper_reader:changeme@localhost:5432/paper_reader'
+    connectionString: process.env.DATABASE_URL || 'postgresql://paper_reader:changeme@postgres:5432/paper_reader'
   },
   minio: {
     endPoint: (process.env.MINIO_ENDPOINT || 'localhost:9000').split(':')[0],

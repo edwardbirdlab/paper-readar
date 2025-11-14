@@ -7,7 +7,8 @@ import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 // Create connection pool
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: process.env.DATABASE_URL ||
+    'postgresql://paper_reader:changeme@postgres:5432/paper_reader',
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,

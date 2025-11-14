@@ -75,6 +75,7 @@ if [ ! -f .env ]; then
 
 # Database Configuration
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+DATABASE_URL=postgresql://paper_reader:$POSTGRES_PASSWORD@postgres:5432/paper_reader
 
 # MinIO Configuration
 MINIO_ROOT_USER=minioadmin
@@ -102,6 +103,7 @@ EOF
     echo ""
 else
     echo "📝 .env file already exists"
+
     # Update NODE_ENV in existing .env file
     if grep -q "^NODE_ENV=" .env; then
         sed -i.bak "s/^NODE_ENV=.*/NODE_ENV=$NODE_ENV/" .env
@@ -110,6 +112,28 @@ else
         echo "NODE_ENV=$NODE_ENV" >> .env
         echo "✅ Added NODE_ENV=$NODE_ENV to .env file"
     fi
+
+    # Ensure DATABASE_URL is set in existing .env file
+    # Extract POSTGRES_PASSWORD from .env if it exists
+    if grep -q "^POSTGRES_PASSWORD=" .env; then
+        POSTGRES_PASSWORD=$(grep "^POSTGRES_PASSWORD=" .env | cut -d'=' -f2-)
+
+        if grep -q "^DATABASE_URL=" .env; then
+            # Update existing DATABASE_URL
+            sed -i.bak "s#^DATABASE_URL=.*#DATABASE_URL=postgresql://paper_reader:$POSTGRES_PASSWORD@postgres:5432/paper_reader#" .env
+            echo "✅ Updated DATABASE_URL in existing .env file"
+        else
+            # Add DATABASE_URL
+            # Insert after POSTGRES_PASSWORD line
+            sed -i.bak "/^POSTGRES_PASSWORD=/a\\
+DATABASE_URL=postgresql://paper_reader:$POSTGRES_PASSWORD@postgres:5432/paper_reader" .env
+            echo "✅ Added DATABASE_URL to .env file"
+        fi
+    else
+        echo "⚠️  Warning: POSTGRES_PASSWORD not found in .env - DATABASE_URL not updated"
+        echo "   Code fallback will use default credentials"
+    fi
+
     echo ""
 fi
 
@@ -229,6 +253,66 @@ sleep 5
 echo ""
 echo "✅ Deployment complete!"
 echo ""
+
+# Verification Section
+echo "🔍 Running verification checks..."
+echo ""
+
+# Test 1: Database connectivity
+echo "1️⃣  Testing database connection..."
+if docker compose exec -T app node -e "
+  const {Pool} = require('pg');
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL || 'postgresql://paper_reader:changeme@postgres:5432/paper_reader'
+  });
+  pool.query('SELECT NOW()')
+    .then(r => {
+      console.log('✓ Database connected:', r.rows[0].now);
+      process.exit(0);
+    })
+    .catch(e => {
+      console.error('✗ Database connection failed:', e.message);
+      process.exit(1);
+    });
+" 2>/dev/null; then
+    echo "   ✅ Database connection successful"
+else
+    echo "   ⚠️  Database connection test failed - check logs with: $COMPOSE_CMD logs app"
+fi
+
+# Test 2: TTS Service health
+echo ""
+echo "2️⃣  Testing TTS service..."
+if curl -s -f http://localhost:3006/health > /dev/null 2>&1; then
+    TTS_STATUS=$(curl -s http://localhost:3006/health | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+    echo "   ✅ TTS service healthy (status: $TTS_STATUS)"
+else
+    echo "   ⚠️  TTS service not responding yet - it may still be downloading models (~340MB)"
+    echo "      Check logs with: $COMPOSE_CMD logs -f tts-service"
+fi
+
+# Test 3: MinIO connectivity
+echo ""
+echo "3️⃣  Testing MinIO storage..."
+if curl -s -f http://localhost:3003/minio/health/live > /dev/null 2>&1; then
+    echo "   ✅ MinIO storage accessible"
+else
+    echo "   ⚠️  MinIO not responding - check logs with: $COMPOSE_CMD logs minio"
+fi
+
+# Test 4: Redis connectivity
+echo ""
+echo "4️⃣  Testing Redis queue..."
+if docker compose exec -T redis redis-cli PING 2>/dev/null | grep -q PONG; then
+    QUEUE_DEPTH=$(docker compose exec -T redis redis-cli LLEN bull:tts-jobs:wait 2>/dev/null || echo "0")
+    echo "   ✅ Redis queue accessible (queue depth: $QUEUE_DEPTH)"
+else
+    echo "   ⚠️  Redis not responding - check logs with: $COMPOSE_CMD logs redis"
+fi
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
 echo "Access your services at:"
 echo "  - Paper Reader App:  http://localhost:3001"
 echo "  - MinIO Console:     http://localhost:3004"
@@ -245,5 +329,5 @@ echo "  View specific logs:  $COMPOSE_CMD logs -f app"
 echo "  Stop services:       $COMPOSE_CMD down"
 echo "  Restart:             $COMPOSE_CMD restart"
 echo ""
-echo "📚 For more details, see DOCKER_DEPLOYMENT.md"
+echo "📚 For troubleshooting, see DEPLOYMENT_TROUBLESHOOTING.md"
 echo ""

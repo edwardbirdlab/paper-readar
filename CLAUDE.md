@@ -30,6 +30,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Migration Guide:** `TTS_V2_MIGRATION_GUIDE.md`
 - **Tests:** `services/tts-service-v2/test_*.py`
 
+### Latest Update: DATABASE_URL Fix (2025-01-14)
+
+**Problem:** PDF uploads failed on remote deployments with "Cannot read properties of undefined" error.
+
+**Fix Applied:**
+1. Added DATABASE_URL fallback in `lib/db/client.ts` and `services/tts-worker/src/index.ts`
+2. Updated `docker-deploy.sh` to automatically set DATABASE_URL in `.env` file
+3. Added verification tests to deployment script
+4. Created comprehensive troubleshooting guide
+
+**Action Required:** If experiencing upload issues, re-run `./docker-deploy.sh` or see `DEPLOYMENT_TROUBLESHOOTING.md`
+
+---
+
+## Troubleshooting
+
+**Having deployment issues?** See `DEPLOYMENT_TROUBLESHOOTING.md` for comprehensive diagnostics and solutions.
+
+Common issues covered:
+- DATABASE_URL undefined errors
+- PDF upload failures
+- TTS service not responding
+- Database connection errors
+- MinIO/storage problems
+
 ---
 
 ## Project Overview
