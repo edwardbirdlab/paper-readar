@@ -276,7 +276,7 @@ export const papers = {
     return downloadFile(BUCKETS.PAPERS, fileName);
   },
 
-  async getUrl(fileName: string): Promise<string> {
+  getUrl(fileName: string): string {
     return getPublicUrl(BUCKETS.PAPERS, fileName);
   },
 
@@ -299,7 +299,7 @@ export const audio = {
     return downloadFile(BUCKETS.AUDIO, fileName);
   },
 
-  async getUrl(fileName: string): Promise<string> {
+  getUrl(fileName: string): string {
     return getPublicUrl(BUCKETS.AUDIO, fileName);
   },
 

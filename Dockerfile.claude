@@ -1,0 +1,33 @@
+FROM claude-code-sandbox:latest
+
+# Install system dependencies for the project
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    redis-tools \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install project dependencies
+WORKDIR /workspace
+COPY package.json package-lock.json* ./
+RUN npm install
+
+# Install TTS worker dependencies
+COPY services/tts-worker/package.json services/tts-worker/package-lock.json* ./services/tts-worker/
+RUN cd services/tts-worker && npm install
+
+# Set environment variables for development
+ENV NODE_ENV=development
+ENV DATABASE_URL=postgresql://paper_reader:paper_reader_password@postgres:5432/paper_reader
+ENV REDIS_URL=redis://redis:6379
+ENV MINIO_ENDPOINT=minio
+ENV MINIO_PORT=9000
+ENV MINIO_ACCESS_KEY=minioadmin
+ENV MINIO_SECRET_KEY=minioadmin
+ENV TTS_SERVICE_URL=http://tts-service:8000
+
+# Expose ports for debugging
+EXPOSE 3000 3001
+
+CMD ["/bin/bash"]

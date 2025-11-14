@@ -27,7 +27,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const completedChunks = chunks.filter((c: any) => c.tts_status === 'completed').length;
 
     // Get PDF URL
-    const pdfUrl = await storage.papers.getUrl(paper.pdf_file_path);
+    const pdfUrl = storage.papers.getUrl(paper.pdf_file_path);
 
     return NextResponse.json({
       id: paper.id,
