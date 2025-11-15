@@ -13,6 +13,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./database/migrations/002_add_text_processing.sql:/docker-entrypoint-initdb.d/02-text-processing.sql
     networks:
       - paper-reader-network
     ports:
@@ -98,28 +99,55 @@ services:
       timeout: 10s
       retries: 3
 
-  # Text Cleanup Service - Phi-3 LLM for text normalization
-  text-cleanup:
+  # Text Processing Service - Two-stage LLM pipeline (Phi-3-mini-128k + Phi-3-medium-128k)
+  text-processing:
     build:
-      context: ./services/text-cleanup
+      context: ./services/text-processing
       dockerfile: Dockerfile
-    container_name: paper-reader-text-cleanup
+    container_name: paper-reader-text-processing
     restart: unless-stopped
     environment:
-      - MODEL_NAME=microsoft/Phi-3-mini-4k-instruct
-      - MAX_TEXT_LENGTH=10000
+      - STAGE1_MODEL=microsoft/Phi-3-mini-128k-instruct
+      - STAGE2_MODEL=microsoft/Phi-3-medium-128k-instruct
+      - LOAD_BOTH_MODELS=true  # Production mode - load both models on startup
+      - MAX_TEXT_LENGTH=200000
+      - CPU_CORES=${CPU_CORES:-12}
     volumes:
-      - phi3_models:/app/models
+      - phi3_models_v2:/app/models
     networks:
       - paper-reader-network
     ports:
-      - "3008:8008"
+      - "3009:8009"
+    deploy:
+      resources:
+        limits:
+          memory: 64G
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
       interval: 30s
       timeout: 10s
-      start_period: 180s  # Give it time to download model on first run
+      start_period: 600s  # Give it 10 minutes to download and load both models on first run
       retries: 3
+
+  # Text Processing Worker - BullMQ worker for two-stage LLM pipeline
+  text-processing-worker:
+    build:
+      context: ./services/text-processing-worker
+      dockerfile: Dockerfile
+    container_name: paper-reader-text-processing-worker
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - postgres
+      - text-processing
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATABASE_URL=postgresql://paper_reader:${POSTGRES_PASSWORD:-changeme}@postgres:5432/paper_reader
+      - TEXT_PROCESSING_URL=http://text-processing:8009
+      - WORKER_CONCURRENCY=1  # Only 1 job at a time (heavy processing)
+    networks:
+      - paper-reader-network
 
   # Kokoro TTS Service v2 - Redesigned with improved error handling
   tts-service:
@@ -183,7 +211,7 @@ services:
       - minio
       - redis
       - pdf-extraction
-      - text-cleanup
+      - text-processing
     ports:
       - "3001:3000"
     environment:
@@ -196,7 +224,7 @@ services:
       - MINIO_USE_SSL=false
       - REDIS_URL=redis://redis:6379
       - PDF_EXTRACTION_URL=http://pdf-extraction:8007
-      - TEXT_CLEANUP_URL=http://text-cleanup:8008
+      - TEXT_PROCESSING_URL=http://text-processing:8009
       - TTS_SERVICE_URL=http://tts-service:8000
       - NEXT_PUBLIC_API_URL=http://localhost:3001
     networks:
@@ -209,7 +237,7 @@ volumes:
   minio_data:
   redis_data:
   tts_models:
-  phi3_models:
+  phi3_models_v2:  # New volume for Phi-3-mini-128k + Phi-3-medium-128k models
 
 networks:
   paper-reader-network:

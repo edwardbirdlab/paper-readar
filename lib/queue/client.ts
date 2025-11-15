@@ -30,6 +30,27 @@ const redisConnection = {
 };
 
 /**
+ * Text Processing Job Queue (Two-stage LLM pipeline)
+ */
+export const textProcessingQueue = new Queue('text-processing-jobs', {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 2, // Retry once if it fails
+    backoff: {
+      type: 'fixed',
+      delay: 60000 // 1 minute
+    },
+    removeOnComplete: {
+      age: 86400, // Keep completed jobs for 24 hours
+      count: 100
+    },
+    removeOnFail: {
+      age: 604800 // Keep failed jobs for 7 days
+    }
+  }
+});
+
+/**
  * TTS Job Queue
  */
 export const ttsQueue = new Queue('tts-jobs', {
@@ -178,16 +199,45 @@ export async function cleanQueue(
 }
 
 /**
+ * Text Processing Job Interface
+ */
+export interface TextProcessingJobData {
+  paperId: string;
+  rawText: string;
+  metadata?: {
+    title?: string;
+    authors?: string;
+    pages?: number;
+  };
+}
+
+/**
+ * Add a text processing job to the queue
+ */
+export async function addTextProcessingJob(data: TextProcessingJobData): Promise<string> {
+  const job = await textProcessingQueue.add('process-text', data, {
+    jobId: `text-${data.paperId}`,
+    priority: 1
+  });
+
+  console.log(`Added text processing job ${job.id} for paper ${data.paperId}`);
+  return job.id || '';
+}
+
+/**
  * Close queue connections
  */
 export async function closeQueues(): Promise<void> {
+  await textProcessingQueue.close();
   await ttsQueue.close();
   await ttsQueueEvents.close();
 }
 
 export default {
+  textProcessingQueue,
   ttsQueue,
   ttsQueueEvents,
+  addTextProcessingJob,
   addTTSJob,
   addBulkTTSJobs,
   getJobStatus,
