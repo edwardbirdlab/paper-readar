@@ -81,6 +81,23 @@ services:
       timeout: 5s
       retries: 5
 
+  # PDF Extraction Service - PyMuPDF-based extraction
+  pdf-extraction:
+    build:
+      context: ./services/pdf-extraction
+      dockerfile: Dockerfile
+    container_name: paper-reader-pdf-extraction
+    restart: unless-stopped
+    networks:
+      - paper-reader-network
+    ports:
+      - "3007:8007"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # Kokoro TTS Service v2 - Redesigned with improved error handling
   tts-service:
     build:
@@ -142,6 +159,7 @@ services:
       - postgres
       - minio
       - redis
+      - pdf-extraction
     ports:
       - "3001:3000"
     environment:
@@ -153,6 +171,7 @@ services:
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       - MINIO_USE_SSL=false
       - REDIS_URL=redis://redis:6379
+      - PDF_EXTRACTION_URL=http://pdf-extraction:8007
       - TTS_SERVICE_URL=http://tts-service:8000
       - NEXT_PUBLIC_API_URL=http://localhost:3001
     networks:

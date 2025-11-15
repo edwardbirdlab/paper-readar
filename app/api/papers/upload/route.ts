@@ -38,27 +38,61 @@ export async function POST(request: NextRequest) {
 
     console.log(`Processing PDF upload: ${file.name} (${file.size} bytes)`);
 
-    // Extract text and metadata from PDF
-    // Use dynamic import for pdf-parse
-    const pdfParse: any = await import('pdf-parse');
-    let pdfData;
+    // Extract text and metadata from PDF using extraction service
+    const pdfExtractionUrl = process.env.PDF_EXTRACTION_URL || 'http://localhost:3007';
+    let text: string;
+    let numpages: number;
+    let metadata: any = {};
+
     try {
-      // Call the default or module itself based on what's available
-      pdfData = await (pdfParse.default || pdfParse)(buffer);
+      console.log(`Sending PDF to extraction service at ${pdfExtractionUrl}`);
+
+      // Create form data for extraction service
+      const extractFormData = new FormData();
+      extractFormData.append('file', file);
+
+      // Call extraction service
+      const extractResponse = await fetch(`${pdfExtractionUrl}/extract`, {
+        method: 'POST',
+        body: extractFormData,
+      });
+
+      if (!extractResponse.ok) {
+        const errorData = await extractResponse.json();
+        throw new Error(errorData.message || 'Extraction service failed');
+      }
+
+      const extractionResult = await extractResponse.json();
+
+      text = extractionResult.text;
+      numpages = extractionResult.pages;
+
+      // Map metadata from extraction service
+      if (extractionResult.metadata) {
+        metadata = {
+          creator: extractionResult.metadata.creator || '',
+          producer: extractionResult.metadata.producer || '',
+          creationDate: extractionResult.metadata.creation_date || '',
+          modDate: extractionResult.metadata.mod_date || '',
+          subject: extractionResult.metadata.subject || '',
+          keywords: extractionResult.metadata.keywords || ''
+        };
+      }
+
+      console.log(`Extraction complete: ${numpages} pages, ${text.length} characters`);
+
     } catch (error: any) {
-      console.error('PDF parsing error:', error);
-      console.error('PDF parsing error stack:', error.stack);
+      console.error('PDF extraction error:', error);
+      console.error('PDF extraction error stack:', error.stack);
       const isDev = process.env.NODE_ENV === 'development';
       return NextResponse.json(
         {
-          error: 'Failed to parse PDF file',
+          error: 'Failed to extract text from PDF',
           ...(isDev && { details: error.message, stack: error.stack })
         },
         { status: 400 }
       );
     }
-
-    const { text, info, numpages } = pdfData;
 
     if (!text || text.trim().length < 100) {
       return NextResponse.json(
@@ -67,17 +101,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Extract metadata
-    const title = info?.Title || file.name.replace('.pdf', '');
-    const authors = info?.Author || '';
-    const metadata = {
-      creator: info?.Creator,
-      producer: info?.Producer,
-      creationDate: info?.CreationDate,
-      modDate: info?.ModDate,
-      subject: info?.Subject,
-      keywords: info?.Keywords
-    };
+    // Extract title and authors from metadata
+    const title = metadata.title || file.name.replace('.pdf', '');
+    const authors = metadata.author || '';
 
     console.log(`Extracted ${numpages} pages, ${text.length} characters`);
 
