@@ -98,6 +98,29 @@ services:
       timeout: 10s
       retries: 3
 
+  # Text Cleanup Service - Phi-3 LLM for text normalization
+  text-cleanup:
+    build:
+      context: ./services/text-cleanup
+      dockerfile: Dockerfile
+    container_name: paper-reader-text-cleanup
+    restart: unless-stopped
+    environment:
+      - MODEL_NAME=microsoft/Phi-3-mini-4k-instruct
+      - MAX_TEXT_LENGTH=10000
+    volumes:
+      - phi3_models:/app/models
+    networks:
+      - paper-reader-network
+    ports:
+      - "3008:8008"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s  # Give it time to download model on first run
+      retries: 3
+
   # Kokoro TTS Service v2 - Redesigned with improved error handling
   tts-service:
     build:
@@ -160,6 +183,7 @@ services:
       - minio
       - redis
       - pdf-extraction
+      - text-cleanup
     ports:
       - "3001:3000"
     environment:
@@ -172,6 +196,7 @@ services:
       - MINIO_USE_SSL=false
       - REDIS_URL=redis://redis:6379
       - PDF_EXTRACTION_URL=http://pdf-extraction:8007
+      - TEXT_CLEANUP_URL=http://text-cleanup:8008
       - TTS_SERVICE_URL=http://tts-service:8000
       - NEXT_PUBLIC_API_URL=http://localhost:3001
     networks:
@@ -184,6 +209,7 @@ volumes:
   minio_data:
   redis_data:
   tts_models:
+  phi3_models:
 
 networks:
   paper-reader-network:

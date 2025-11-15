@@ -22,7 +22,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ✅ Faster extraction
 - ✅ Good section detection
 
-**Next Step:** Phase 2 - Phi-3 LLM cleanup service to remove citations, headers, abbreviations
+**Status:** ✅ Phase 1 complete, Phase 2 in progress
+
+### Text Cleanup Service - Phase 2 (2025-01-15)
+
+**NEW:** Phi-3 LLM service for intelligent text normalization before TTS.
+
+**What Changed:**
+- **New Service:** `services/text-cleanup/` - FastAPI service using Phi-3-mini LLM
+- **Port:** 3008 (internal 8008)
+- **Model:** microsoft/Phi-3-mini-4k-instruct (~2.4GB)
+- **API:** `POST /cleanup` - Clean text with LLM-powered rules
+
+**Cleanup Features:**
+- ✅ Removes citations: [1], (Author, 2020), et al.
+- ✅ Expands abbreviations: µl → microliter, LD₅₀ → lethal dose fifty
+- ✅ Expands species names: C. quinquefasciatus → Culex quinquefasciatus
+- ✅ Expands Greek letters: α → alpha, β → beta
+- ✅ Removes headers/footers, page numbers, journal names
+- ✅ Removes figure/table references and captions
+- ✅ Cleans author affiliations and institutional text
+
+**Integration:**
+Automatically called in upload pipeline between extraction and chunking. Falls back to raw text if unavailable.
 
 ---
 
@@ -95,6 +117,7 @@ All services use sequential ports starting from 3001:
 - **Redis**: 3005 (internal 6379)
 - **TTS Service**: 3006 (internal 8000)
 - **PDF Extraction**: 3007 (internal 8007)
+- **Text Cleanup**: 3008 (internal 8008)
 
 ## Essential Commands
 
@@ -156,30 +179,44 @@ docker-compose exec app node -e "const {Pool}=require('pg'); new Pool({connectio
 
 ### Service Communication Flow
 
-**7 Core Services in Docker Stack** (all communicate via `paper-reader-network`):
+**8 Core Services in Docker Stack** (all communicate via `paper-reader-network`):
 
 1. **PostgreSQL** (port 5432) - Primary data store
 2. **MinIO** (ports 9000/9001) - S3-compatible object storage
 3. **Redis** (port 6379) - BullMQ job queue backend
 4. **PDF Extraction** (port 8007) - PyMuPDF-based text extraction
-5. **Kokoro TTS Service** (port 8000) - FastAPI-based TTS generation
-6. **TTS Worker** (no exposed ports) - BullMQ background processor
-7. **Next.js App** (port 3000) - Frontend + API routes
+5. **Text Cleanup** (port 8008) - Phi-3 LLM text normalization
+6. **Kokoro TTS Service** (port 8000) - FastAPI-based TTS generation
+7. **TTS Worker** (no exposed ports) - BullMQ background processor
+8. **Next.js App** (port 3000) - Frontend + API routes
 
-**Data Flow Pattern**:
+**Data Flow Pattern** (Two-Phase Processing):
 ```
 User Upload (PDF)
   → Next.js API (/api/papers/upload)
+
+  PHASE 1: EXTRACTION
   → Call PDF Extraction Service (HTTP POST /extract)
-  → Extraction Service uses PyMuPDF to extract text
+  → PyMuPDF extracts raw text from PDF
+
+  PHASE 2: CLEANUP (New!)
+  → Call Text Cleanup Service (HTTP POST /cleanup)
+  → Phi-3 LLM removes citations, expands abbreviations
+  → Returns cleaned, normalized text
+
+  STORAGE & PROCESSING
   → Store PDF in MinIO (papers bucket)
-  → Chunk extracted text (lib/utils/chunking.ts)
+  → Chunk cleaned text (lib/utils/chunking.ts)
   → Create records in PostgreSQL (papers, paper_chunks)
   → Queue jobs in Redis (BullMQ)
+
+  TTS GENERATION
   → TTS Worker pulls jobs
   → Worker calls TTS Service (HTTP POST /synthesize)
   → Worker uploads audio to MinIO (audio bucket)
   → Worker updates PostgreSQL (chunk status, audio path)
+
+  PLAYBACK
   → Frontend polls for completion
   → User plays audio from MinIO public URLs
 ```

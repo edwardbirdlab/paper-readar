@@ -107,6 +107,45 @@ export async function POST(request: NextRequest) {
 
     console.log(`Extracted ${numpages} pages, ${text.length} characters`);
 
+    // Phase 2: Clean up text using Phi-3 LLM
+    const textCleanupUrl = process.env.TEXT_CLEANUP_URL;
+    let cleanedText = text;
+
+    if (textCleanupUrl) {
+      try {
+        console.log(`Sending text to cleanup service at ${textCleanupUrl}`);
+
+        const cleanupResponse = await fetch(`${textCleanupUrl}/cleanup`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            text: text,
+            temperature: 0.3,
+            max_tokens: 4000
+          }),
+        });
+
+        if (cleanupResponse.ok) {
+          const cleanupResult = await cleanupResponse.json();
+          cleanedText = cleanupResult.cleaned_text;
+          console.log(
+            `Text cleanup complete: ${text.length} → ${cleanedText.length} chars ` +
+            `(${cleanupResult.reduction_percent}% reduction)`
+          );
+        } else {
+          console.warn('Text cleanup failed, using raw extraction:', await cleanupResponse.text());
+          // Continue with raw text if cleanup fails
+        }
+      } catch (error: any) {
+        console.warn('Text cleanup service unavailable, using raw extraction:', error.message);
+        // Continue with raw text if cleanup service is unavailable
+      }
+    } else {
+      console.log('Text cleanup service not configured, skipping cleanup phase');
+    }
+
     // Generate unique file path
     const timestamp = Date.now();
     const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
@@ -123,7 +162,7 @@ export async function POST(request: NextRequest) {
       authors,
       pdfFilePath: filePath,
       totalPages: numpages,
-      extractedText: text,
+      extractedText: cleanedText,  // Use cleaned text instead of raw
       metadata
     });
 
@@ -134,9 +173,9 @@ export async function POST(request: NextRequest) {
       ttsStatus: 'processing'
     });
 
-    // Chunk the paper text
+    // Chunk the paper text (using cleaned text)
     console.log('Chunking paper text...');
-    const chunks = chunkPaperText(text);
+    const chunks = chunkPaperText(cleanedText);
     console.log(`Created ${chunks.length} chunks`);
 
     // Create chunk records and queue TTS jobs
