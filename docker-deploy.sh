@@ -28,6 +28,8 @@ echo "This will deploy the complete stack including:"
 echo "  - PostgreSQL database"
 echo "  - MinIO object storage (S3-compatible)"
 echo "  - Redis job queue"
+echo "  - Text processing service (Phi-3 models)"
+echo "  - Text processing worker"
 echo "  - Kokoro TTS service"
 echo "  - TTS worker"
 echo "  - Next.js app"
@@ -210,6 +212,14 @@ else
     TABLES=("papers" "paper_chunks" "tags" "paper_tags" "highlights" "notes" "audio_sessions" "reading_history")
     MISSING_TABLES=()
 
+    # Also verify text processing migration was applied
+    echo "   Verifying text processing migration..."
+    if docker compose exec -T postgres psql -U paper_reader -d paper_reader -c "SELECT processing_stage FROM papers LIMIT 1" 2>/dev/null | grep -q "processing_stage"; then
+        echo "   ✓ Text processing migration applied"
+    else
+        echo "   ℹ️  Text processing migration not yet applied (will run on first startup)"
+    fi
+
     for table in "${TABLES[@]}"; do
         if ! docker compose exec -T postgres psql -U paper_reader -d paper_reader -c "\\dt $table" 2>/dev/null | grep -q "$table"; then
             MISSING_TABLES+=("$table")
@@ -280,9 +290,22 @@ else
     echo "   ⚠️  Database connection test failed - check logs with: $COMPOSE_CMD logs app"
 fi
 
-# Test 2: TTS Service health
+# Test 2: Text Processing Service health
 echo ""
-echo "2️⃣  Testing TTS service..."
+echo "2️⃣  Testing text processing service..."
+if curl -s -f http://localhost:3009/health > /dev/null 2>&1; then
+    TEXT_PROC_STATUS=$(curl -s http://localhost:3009/health 2>/dev/null | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+    echo "   ✅ Text processing service healthy (status: $TEXT_PROC_STATUS)"
+    echo "      Note: Models load on startup - this may take 5-10 minutes on first run (~21GB download)"
+else
+    echo "   ⚠️  Text processing service not responding yet"
+    echo "      This is normal - models are likely still loading (~5-10 minutes)"
+    echo "      Check logs with: $COMPOSE_CMD logs -f text-processing"
+fi
+
+# Test 3: TTS Service health
+echo ""
+echo "3️⃣  Testing TTS service..."
 if curl -s -f http://localhost:3006/health > /dev/null 2>&1; then
     TTS_STATUS=$(curl -s http://localhost:3006/health | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
     echo "   ✅ TTS service healthy (status: $TTS_STATUS)"
@@ -291,21 +314,24 @@ else
     echo "      Check logs with: $COMPOSE_CMD logs -f tts-service"
 fi
 
-# Test 3: MinIO connectivity
+# Test 4: MinIO connectivity
 echo ""
-echo "3️⃣  Testing MinIO storage..."
+echo "4️⃣  Testing MinIO storage..."
 if curl -s -f http://localhost:3003/minio/health/live > /dev/null 2>&1; then
     echo "   ✅ MinIO storage accessible"
 else
     echo "   ⚠️  MinIO not responding - check logs with: $COMPOSE_CMD logs minio"
 fi
 
-# Test 4: Redis connectivity
+# Test 5: Redis connectivity
 echo ""
-echo "4️⃣  Testing Redis queue..."
+echo "5️⃣  Testing Redis queue..."
 if docker compose exec -T redis redis-cli PING 2>/dev/null | grep -q PONG; then
-    QUEUE_DEPTH=$(docker compose exec -T redis redis-cli LLEN bull:tts-jobs:wait 2>/dev/null || echo "0")
-    echo "   ✅ Redis queue accessible (queue depth: $QUEUE_DEPTH)"
+    TEXT_QUEUE_DEPTH=$(docker compose exec -T redis redis-cli LLEN bull:text-processing-jobs:wait 2>/dev/null || echo "0")
+    TTS_QUEUE_DEPTH=$(docker compose exec -T redis redis-cli LLEN bull:tts-jobs:wait 2>/dev/null || echo "0")
+    echo "   ✅ Redis queue accessible"
+    echo "      Text processing queue: $TEXT_QUEUE_DEPTH jobs"
+    echo "      TTS queue: $TTS_QUEUE_DEPTH jobs"
 else
     echo "   ⚠️  Redis not responding - check logs with: $COMPOSE_CMD logs redis"
 fi
@@ -314,11 +340,12 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "Access your services at:"
-echo "  - Paper Reader App:  http://localhost:3001"
-echo "  - MinIO Console:     http://localhost:3004"
-echo "  - PostgreSQL:        localhost:3002"
-echo "  - Redis:             localhost:3005"
-echo "  - TTS Service:       http://localhost:3006/health"
+echo "  - Paper Reader App:      http://localhost:3001"
+echo "  - MinIO Console:         http://localhost:3004"
+echo "  - PostgreSQL:            localhost:3002"
+echo "  - Redis:                 localhost:3005"
+echo "  - TTS Service:           http://localhost:3006/health"
+echo "  - Text Processing:       http://localhost:3009/health"
 echo ""
 echo "📦 MinIO buckets (papers, audio) are automatically created"
 echo "📊 Database schema is automatically initialized"

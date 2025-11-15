@@ -107,45 +107,6 @@ export async function POST(request: NextRequest) {
 
     console.log(`Extracted ${numpages} pages, ${text.length} characters`);
 
-    // Phase 2: Clean up text using Phi-3 LLM
-    const textCleanupUrl = process.env.TEXT_CLEANUP_URL;
-    let cleanedText = text;
-
-    if (textCleanupUrl) {
-      try {
-        console.log(`Sending text to cleanup service at ${textCleanupUrl}`);
-
-        const cleanupResponse = await fetch(`${textCleanupUrl}/cleanup`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            text: text,
-            temperature: 0.3,
-            max_tokens: 4000
-          }),
-        });
-
-        if (cleanupResponse.ok) {
-          const cleanupResult = await cleanupResponse.json();
-          cleanedText = cleanupResult.cleaned_text;
-          console.log(
-            `Text cleanup complete: ${text.length} → ${cleanedText.length} chars ` +
-            `(${cleanupResult.reduction_percent}% reduction)`
-          );
-        } else {
-          console.warn('Text cleanup failed, using raw extraction:', await cleanupResponse.text());
-          // Continue with raw text if cleanup fails
-        }
-      } catch (error: any) {
-        console.warn('Text cleanup service unavailable, using raw extraction:', error.message);
-        // Continue with raw text if cleanup service is unavailable
-      }
-    } else {
-      console.log('Text cleanup service not configured, skipping cleanup phase');
-    }
-
     // Generate unique file path
     const timestamp = Date.now();
     const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
@@ -155,81 +116,52 @@ export async function POST(request: NextRequest) {
     console.log('Uploading PDF to storage...');
     await storage.papers.upload(filePath, buffer);
 
-    // Create paper record in database
+    // Create paper record in database with text_processing status
     console.log('Creating paper record...');
     const paper = await db.papers.create({
       title,
       authors,
       pdfFilePath: filePath,
       totalPages: numpages,
-      extractedText: cleanedText,  // Use cleaned text instead of raw
+      extractedText: text,  // Store raw extracted text
       metadata
     });
 
     console.log(`Paper created with ID: ${paper.id}`);
 
-    // Update paper to processing status
-    await db.papers.update(paper.id, {
-      ttsStatus: 'processing'
-    });
-
-    // Chunk the paper text (using cleaned text)
-    console.log('Chunking paper text...');
-    const chunks = chunkPaperText(cleanedText);
-    console.log(`Created ${chunks.length} chunks`);
-
-    // Create chunk records and queue TTS jobs
-    const ttsJobs = [];
-
-    for (const chunk of chunks) {
-      // Clean text for TTS
-      const cleanedText = cleanTextForTTS(chunk.text);
-
-      // Create chunk record
-      const chunkRecord = await db.paperChunks.create({
-        paperId: paper.id,
-        chunkIndex: chunk.index,
-        chunkType: chunk.type,
-        sectionTitle: chunk.sectionTitle,
-        textContent: cleanedText,
-        startPage: chunk.startPage,
-        endPage: chunk.endPage,
-        wordCount: chunk.wordCount,
-        charCount: chunk.charCount
-      });
-
-      // Prepare TTS job
-      ttsJobs.push({
-        paperId: paper.id,
-        chunkId: chunkRecord.id,
-        text: cleanedText,
-        chunkIndex: chunk.index,
-        voice: 'af_sarah' // Default voice
-      });
-    }
-
-    // Queue all TTS jobs in bulk
-    console.log(`Queueing ${ttsJobs.length} TTS jobs...`);
-    await queue.addBulkTTSJobs(ttsJobs);
-
-    // Update paper with TTS started timestamp
+    // Update paper to text_processing status
     await db.query(
-      `UPDATE papers SET tts_started_at = NOW() WHERE id = $1`,
+      `UPDATE papers
+       SET processing_stage = 'text_processing',
+           text_processing_started_at = NOW()
+       WHERE id = $1`,
       [paper.id]
     );
 
-    console.log(`Upload complete for paper ${paper.id}`);
+    // Queue text processing job (two-stage LLM pipeline)
+    console.log('Queueing text processing job...');
+    await queue.addTextProcessingJob({
+      paperId: paper.id,
+      rawText: text,
+      metadata: {
+        title,
+        authors,
+        pages: numpages
+      }
+    });
+
+    console.log(`Upload complete for paper ${paper.id} - text processing queued`);
 
     return NextResponse.json({
       id: paper.id,
-      message: 'Paper uploaded successfully and TTS processing started',
+      message: 'Paper uploaded successfully - AI processing will take 2-3 hours',
       paper: {
         id: paper.id,
         title: paper.title,
         authors: paper.authors,
         totalPages: paper.total_pages,
-        totalChunks: chunks.length,
-        ttsStatus: 'processing'
+        processingStage: 'text_processing',
+        estimatedTime: '2-3 hours'
       }
     });
 
