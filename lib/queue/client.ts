@@ -40,7 +40,6 @@ export const textProcessingQueue = new Queue('text-processing-jobs', {
       type: 'fixed',
       delay: 60000 // 1 minute
     },
-    timeout: 7200000, // 2 hour timeout
     removeOnComplete: {
       age: 86400, // Keep completed jobs for 24 hours
       count: 100
