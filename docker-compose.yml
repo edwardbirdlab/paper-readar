@@ -143,7 +143,7 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - DATABASE_URL=postgresql://paper_reader:${POSTGRES_PASSWORD:-changeme}@postgres:5432/paper_reader
+      - DATABASE_URL=${DATABASE_URL:-postgresql://paper_reader:changeme@postgres:5432/paper_reader}
       - TEXT_PROCESSING_URL=http://text-processing:8009
       - WORKER_CONCURRENCY=1  # Only 1 job at a time (heavy processing)
     networks:
@@ -190,7 +190,7 @@ services:
       - tts-service
     environment:
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql://paper_reader:${POSTGRES_PASSWORD:-changeme}@postgres:5432/paper_reader
+      - DATABASE_URL=${DATABASE_URL:-postgresql://paper_reader:changeme@postgres:5432/paper_reader}
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
@@ -216,7 +216,7 @@ services:
       - "3001:3000"
     environment:
       - NODE_ENV=${NODE_ENV:-development}
-      - DATABASE_URL=postgresql://paper_reader:${POSTGRES_PASSWORD:-changeme}@postgres:5432/paper_reader
+      - DATABASE_URL=${DATABASE_URL:-postgresql://paper_reader:changeme@postgres:5432/paper_reader}
       - MINIO_ENDPOINT=minio:9000
       - MINIO_PUBLIC_ENDPOINT=${MINIO_PUBLIC_ENDPOINT:-localhost:3003}
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
