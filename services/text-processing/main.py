@@ -71,8 +71,8 @@ async def lifespan(app: FastAPI):
             stage1_pipeline = pipeline(
                 "text-generation",
                 model=stage1_model,
-                tokenizer=stage1_tokenizer,
-                device=DEVICE
+                tokenizer=stage1_tokenizer
+                # Don't specify device when using device_map
             )
             logger.info("✓ Stage 1 model loaded (~10GB RAM)")
 
@@ -90,8 +90,8 @@ async def lifespan(app: FastAPI):
             stage2_pipeline = pipeline(
                 "text-generation",
                 model=stage2_model,
-                tokenizer=stage2_tokenizer,
-                device=DEVICE
+                tokenizer=stage2_tokenizer
+                # Don't specify device when using device_map
             )
             logger.info("✓ Stage 2 model loaded (~28GB RAM)")
             logger.info("✓ Both models loaded successfully (~38GB total RAM)")

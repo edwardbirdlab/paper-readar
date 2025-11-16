@@ -63,6 +63,9 @@ if [ ! -f .env ]; then
     POSTGRES_PASSWORD=$(openssl rand -base64 32)
     MINIO_ROOT_PASSWORD=$(openssl rand -base64 24)
 
+    # URL-encode the password for DATABASE_URL (encode special chars like /, +, =)
+    POSTGRES_PASSWORD_ENCODED=$(printf %s "$POSTGRES_PASSWORD" | jq -sRr @uri)
+
     echo ""
     echo "Creating .env file with generated credentials..."
 
@@ -77,7 +80,7 @@ if [ ! -f .env ]; then
 
 # Database Configuration
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
-DATABASE_URL=postgresql://paper_reader:$POSTGRES_PASSWORD@postgres:5432/paper_reader
+DATABASE_URL=postgresql://paper_reader:$POSTGRES_PASSWORD_ENCODED@postgres:5432/paper_reader
 
 # MinIO Configuration
 MINIO_ROOT_USER=minioadmin
@@ -120,16 +123,19 @@ else
     if grep -q "^POSTGRES_PASSWORD=" .env; then
         POSTGRES_PASSWORD=$(grep "^POSTGRES_PASSWORD=" .env | cut -d'=' -f2-)
 
+        # URL-encode the password for DATABASE_URL (encode special chars like /, +, =)
+        POSTGRES_PASSWORD_ENCODED=$(printf %s "$POSTGRES_PASSWORD" | jq -sRr @uri)
+
         if grep -q "^DATABASE_URL=" .env; then
-            # Update existing DATABASE_URL
-            sed -i.bak "s#^DATABASE_URL=.*#DATABASE_URL=postgresql://paper_reader:$POSTGRES_PASSWORD@postgres:5432/paper_reader#" .env
-            echo "✅ Updated DATABASE_URL in existing .env file"
+            # Update existing DATABASE_URL with URL-encoded password
+            sed -i.bak "s#^DATABASE_URL=.*#DATABASE_URL=postgresql://paper_reader:$POSTGRES_PASSWORD_ENCODED@postgres:5432/paper_reader#" .env
+            echo "✅ Updated DATABASE_URL in existing .env file (password URL-encoded)"
         else
-            # Add DATABASE_URL
+            # Add DATABASE_URL with URL-encoded password
             # Insert after POSTGRES_PASSWORD line
             sed -i.bak "/^POSTGRES_PASSWORD=/a\\
-DATABASE_URL=postgresql://paper_reader:$POSTGRES_PASSWORD@postgres:5432/paper_reader" .env
-            echo "✅ Added DATABASE_URL to .env file"
+DATABASE_URL=postgresql://paper_reader:$POSTGRES_PASSWORD_ENCODED@postgres:5432/paper_reader" .env
+            echo "✅ Added DATABASE_URL to .env file (password URL-encoded)"
         fi
     else
         echo "⚠️  Warning: POSTGRES_PASSWORD not found in .env - DATABASE_URL not updated"
